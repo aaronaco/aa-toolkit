@@ -9,7 +9,7 @@ from typing import Annotated, Any
 import typer
 from typer.core import TyperGroup
 
-from aa_cli.output import Output
+from aa_cli.output import ExitCode, Output
 
 
 class AaGroup(TyperGroup):
@@ -25,16 +25,32 @@ class AaGroup(TyperGroup):
         **extra: Any,
     ) -> Any:
         out = Output.from_args(sys.argv[1:] if args is None else args, os.environ)
-        code = super().main(
-            args,
-            prog_name,
-            complete_var,
-            standalone_mode=False,
-            windows_expand_args=windows_expand_args,
-            obj=out,
-            **extra,
-        )
-        sys.exit(code if isinstance(code, int) else 0)
+        try:
+            code = super().main(
+                args,
+                prog_name,
+                complete_var,
+                standalone_mode=False,
+                windows_expand_args=windows_expand_args,
+                obj=out,
+                **extra,
+            )
+        except typer.TyperException as exc:
+            # Typer gives every usage error (bad flag, missing argument) exit code 2.
+            if exc.exit_code != ExitCode.USAGE:
+                raise
+            _report_usage_error(out, exc)
+            code = ExitCode.USAGE
+        sys.exit(code if isinstance(code, int) else ExitCode.OK)
+
+
+def _report_usage_error(out: Output, exc: typer.TyperException) -> None:
+    ctx = getattr(exc, "ctx", None)
+    help_command = f"{ctx.command_path} --help" if ctx is not None else "aa --help"
+    if out.json:
+        out.failure("usage", exc.format_message(), fix=help_command)
+    else:
+        exc.show()  # type: ignore[attr-defined]  # usage errors carry Click's show()
 
 
 app = typer.Typer(cls=AaGroup, add_completion=False, pretty_exceptions_enable=False)

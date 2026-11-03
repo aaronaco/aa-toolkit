@@ -8,9 +8,17 @@ stdout: ``{"ok": true, "data": ...}`` on success and
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from enum import IntEnum
 from typing import Any
 
 import typer
+
+
+class ExitCode(IntEnum):
+    OK = 0
+    PROBLEMS = 1
+    USAGE = 2
+    UNEXPECTED = 3
 
 
 @dataclass(frozen=True)
@@ -38,6 +46,26 @@ class Output:
             _write_json({"ok": True, "data": data})
         else:
             typer.echo(human)
+
+    def failure(
+        self,
+        code: str,
+        message: str,
+        fix: str | None = None,
+        data: dict[str, Any] | None = None,
+    ) -> None:
+        if self.json:
+            envelope: dict[str, Any] = {
+                "ok": False,
+                "error": {"code": code, "message": message, "fix": fix},
+            }
+            if data is not None:
+                envelope["data"] = data
+            _write_json(envelope)
+        else:
+            typer.echo(f"Error: {message}", err=True)
+            if fix:
+                typer.echo(f"Fix: {fix}", err=True)
 
 
 def _write_json(envelope: dict[str, Any]) -> None:
