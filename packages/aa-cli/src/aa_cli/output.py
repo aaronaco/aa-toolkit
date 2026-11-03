@@ -35,7 +35,7 @@ class Output:
     verbose: bool
 
     @classmethod
-    def from_args(cls, args: Sequence[str], environ: Mapping[str, str]) -> "Output":
+    def from_args(cls, args: Sequence[str], environ: Mapping[str, str]) -> Output:
         """Read the global flags straight from the raw arguments.
 
         The flags are accepted before or after a subcommand, and they must

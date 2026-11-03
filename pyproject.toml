@@ -23,3 +23,13 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests", "packages/aa-cli/tests"]
 addopts = ["--import-mode=importlib"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["aa_cli"]

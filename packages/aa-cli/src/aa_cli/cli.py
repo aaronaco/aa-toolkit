@@ -63,9 +63,9 @@ def _report_usage_error(out: Output, exc: typer.TyperException) -> ExitCode:
 
 def _report_unexpected_error(out: Output, exc: Exception) -> ExitCode:
     log.debug("Unexpected error", exc_info=exc)
-    message = f"{type(exc).__name__}: {exc}".splitlines()[0]
-    fix = None if out.verbose else "Run the command again with --verbose to see the traceback."
-    out.failure("unexpected", message, fix=fix)
+    detail = str(exc).splitlines()[0] if str(exc) else ""
+    message = f"{type(exc).__name__}: {detail}" if detail else type(exc).__name__
+    out.failure("unexpected", message)
     return ExitCode.UNEXPECTED
 
 
