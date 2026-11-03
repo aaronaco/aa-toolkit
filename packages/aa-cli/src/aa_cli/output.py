@@ -6,12 +6,20 @@ stdout: ``{"ok": true, "data": ...}`` on success and
 """
 
 import json
+import logging
+import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import Any
+from typing import Annotated, Any
 
 import typer
+
+JsonFlag = Annotated[
+    bool, typer.Option("--json", help="Print one JSON object on stdout. Same as AA_JSON=1.")
+]
+VerboseFlag = Annotated[bool, typer.Option("--verbose", help="Log debug details to stderr.")]
+"""Every command declares both flags, so they work before or after the subcommand."""
 
 
 class ExitCode(IntEnum):
@@ -66,6 +74,18 @@ class Output:
             typer.echo(f"Error: {message}", err=True)
             if fix:
                 typer.echo(f"Fix: {fix}", err=True)
+
+
+def configure_logging(verbose: bool) -> None:
+    """Send aa's logs to stderr: debug with --verbose, warnings otherwise."""
+    logger = logging.getLogger("aa")
+    for handler in list(logger.handlers):
+        logger.removeHandler(handler)
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
+    logger.addHandler(handler)
+    logger.setLevel(logging.DEBUG if verbose else logging.WARNING)
+    logger.propagate = False
 
 
 def _write_json(envelope: dict[str, Any]) -> None:
