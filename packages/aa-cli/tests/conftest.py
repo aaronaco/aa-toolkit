@@ -26,6 +26,12 @@ def aa():
 
 
 @pytest.fixture
+def package_dir() -> Path:
+    """The aa-cli package folder in this checkout."""
+    return PACKAGE_DIR
+
+
+@pytest.fixture
 def package_version() -> str:
     """The version declared in the aa-cli pyproject."""
     return tomllib.loads((PACKAGE_DIR / "pyproject.toml").read_text())["project"]["version"]
