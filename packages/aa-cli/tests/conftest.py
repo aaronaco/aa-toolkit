@@ -28,6 +28,16 @@ print(f"fake gh: unsupported arguments {sys.argv[1:]}", file=sys.stderr)
 sys.exit(2)
 """
 
+OLD_GIT = """\
+import subprocess
+import sys
+
+if "--show-scope" in sys.argv[1:]:
+    print("error: unknown option `show-scope'", file=sys.stderr)
+    sys.exit(129)
+sys.exit(subprocess.run([{real!r}, *sys.argv[1:]]).returncode)
+"""
+
 
 class Machine:
     """A stand-in machine: a PATH that holds only the tools a test puts on it.
@@ -63,6 +73,14 @@ class Machine:
         if real is None:
             pytest.fail(f"{name} must be installed to run this test")
         self._write_shim(name, [real])
+
+    def add_old_git(self) -> None:
+        """Put a git older than 2.26 on PATH: the real git, minus ``--show-scope``."""
+        real = shutil.which("git")
+        if real is None:
+            pytest.fail("git must be installed to run this test")
+        (self.bin / "old_git.py").write_text(OLD_GIT.format(real=real))
+        self._write_shim("git", [sys.executable, str(self.bin / "old_git.py")])
 
     def add_gh(self, signed_in: bool = True) -> None:
         """Put a fake gh on PATH, signed in or signed out."""

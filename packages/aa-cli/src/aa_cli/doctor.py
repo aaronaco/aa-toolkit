@@ -140,7 +140,12 @@ def _machine_git_config(key: str) -> str:
     A new project only sees machine-wide config, so a name set in the repo
     ``aa doctor`` happens to run in must not count.
     """
-    listed = _run("git", "config", "--get-all", "--show-scope", key).stdout
+    scoped = _run("git", "config", "--get-all", "--show-scope", key)
+    if scoped.returncode not in (0, 1):
+        # Git before 2.26 has no --show-scope (exit 1 only means "not set").
+        # Read the value as git would use it, repo config included.
+        return _run("git", "config", "--get", key).stdout.strip()
+    listed = scoped.stdout
     values = [
         value
         for scope, _, value in (line.partition("\t") for line in listed.splitlines())

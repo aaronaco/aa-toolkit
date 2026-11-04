@@ -239,3 +239,28 @@ def test_an_identity_set_only_in_the_current_repo_does_not_pass_git_identity(aa,
     check = checks_by_id(json.loads(result.stdout))["git_identity"]
     assert check["status"] == "fail"
     assert "git config --global user.name" in check["fix"]
+
+
+@pytest.mark.parametrize("signed_in", [True, False], ids=["checks-pass", "checks-fail"])
+def test_aa_json_env_gives_doctor_one_envelope_whose_ok_matches_the_exit_code(
+    aa, machine, signed_in
+):
+    machine.full()
+    machine.add_gh(signed_in=signed_in)
+
+    result = aa("doctor", env={**machine.env, "AA_JSON": "1"})
+
+    envelope = json.loads(result.stdout)
+    assert envelope["ok"] is signed_in
+    assert result.exit_code == (0 if signed_in else 1)
+    assert [check["id"] for check in envelope["data"]["checks"]] == [*MACHINE_IDS, "project"]
+
+
+def test_git_identity_passes_on_git_older_than_2_26(aa, machine):
+    machine.full()
+    machine.add_old_git()
+
+    result = aa("doctor", "--json", env=machine.env)
+
+    assert result.exit_code == 0
+    assert checks_by_id(json.loads(result.stdout))["git_identity"]["status"] == "pass"
