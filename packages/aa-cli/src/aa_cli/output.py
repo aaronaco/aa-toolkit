@@ -27,6 +27,14 @@ class ExitCode(IntEnum):
     PROBLEMS = 1
     USAGE = 2
     UNEXPECTED = 3
+    ABORTED = 130  # the shell convention for a command stopped by Ctrl+C
+
+
+class Aborted(Exception):
+    """The user stopped aa with Ctrl+C. The message says what was left behind."""
+
+    def __init__(self, message: str = "Aborted") -> None:
+        super().__init__(message)
 
 
 @dataclass(frozen=True)

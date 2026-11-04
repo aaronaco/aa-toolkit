@@ -31,7 +31,14 @@ from aa_cli.init import (
     is_empty_folder_or_missing,
     outer_workspace_taking_in,
 )
-from aa_cli.output import ExitCode, JsonFlag, Output, VerboseFlag, configure_logging
+from aa_cli.output import (
+    Aborted,
+    ExitCode,
+    JsonFlag,
+    Output,
+    VerboseFlag,
+    configure_logging,
+)
 
 log = logging.getLogger("aa")
 
@@ -71,9 +78,19 @@ class AaGroup(TyperGroup):
                 code = _report_unexpected_error(out, exc)
             else:
                 code = _report_usage_error(out, exc)
+        except (Aborted, typer.Abort) as exc:
+            code = _report_aborted(out, exc)
         except Exception as exc:
             code = _report_unexpected_error(out, exc)
         sys.exit(code if isinstance(code, int) else ExitCode.OK)
+
+    def invoke(self, ctx: typer.Context) -> Any:
+        # Typer turns KeyboardInterrupt into a bare exit 130 with nothing on
+        # stdout; catch it first so it is reported like any other failure.
+        try:
+            return super().invoke(ctx)
+        except KeyboardInterrupt as exc:
+            raise Aborted() from exc
 
 
 @contextlib.contextmanager
@@ -108,6 +125,11 @@ def _report_usage_error(out: Output, exc: typer.TyperException) -> ExitCode:
     else:
         exc.show()  # type: ignore[attr-defined]  # usage errors carry Click's show()
     return ExitCode.USAGE
+
+
+def _report_aborted(out: Output, exc: Exception) -> ExitCode:
+    out.failure("aborted", str(exc) if isinstance(exc, Aborted) else "Aborted")
+    return ExitCode.ABORTED
 
 
 def _report_unexpected_error(out: Output, exc: Exception) -> ExitCode:
@@ -208,6 +230,8 @@ def init(
     except StepFailed as exc:
         out.failure("step_failed", str(exc), fix=exc.fix)
         raise typer.Exit(ExitCode.PROBLEMS) from exc
+    except KeyboardInterrupt as exc:
+        raise Aborted(f"Aborted; the folder {target} was left as it is") from exc
     data = {"path": str(target), "kind": str(kind), "files": created, "github_url": github_url}
     lines = [f"Created a {kind} project at {target}", *(f"  {f}" for f in created)]
     if github_url:
