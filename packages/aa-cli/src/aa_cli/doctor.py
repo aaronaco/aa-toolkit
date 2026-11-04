@@ -209,7 +209,12 @@ def _lockfile(project: _Project) -> Check:
     fix = project.cd_to_root("uv lock")
     if not (project.root / "uv.lock").is_file():
         return Check("lockfile", Scope.PROJECT, Status.FAIL, "uv.lock not found", fix)
-    result = run("uv", "lock", "--check", cwd=project.root)
+    # A UV_PYTHON in the environment (setup-uv sets one in CI) beats the project's
+    # .python-version, and an interpreter outside requires-python fails the check.
+    # --python beats UV_PYTHON, so ask for the pinned version.
+    pinned = _pinned_python(project.root)
+    python = ["--python", pinned] if pinned else []
+    result = run("uv", "lock", "--check", *python, cwd=project.root)
     if result.returncode == 0:
         message = "uv.lock is in sync with pyproject.toml"
         return Check("lockfile", Scope.PROJECT, Status.PASS, message)
@@ -222,6 +227,16 @@ def _lockfile(project: _Project) -> Check:
     message = f"uv lock --check failed: {detail}" if detail else "uv lock --check failed"
     fix = f"Fix the error uv reports, then run {fix}"
     return Check("lockfile", Scope.PROJECT, Status.FAIL, message, fix)
+
+
+def _pinned_python(root: Path) -> str | None:
+    """The version in the project's .python-version, or None without one."""
+    try:
+        lines = (root / ".python-version").read_text(encoding="utf-8").splitlines()
+    except OSError, UnicodeDecodeError:
+        return None
+    versions = [line.strip() for line in lines if line.strip() and not line.startswith("#")]
+    return versions[0] if versions else None
 
 
 def _file_exists(check_id: str, project: _Project, path: str, purpose: str) -> Check:

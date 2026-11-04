@@ -54,6 +54,16 @@ def test_doctor_in_a_project_made_by_init_passes_every_check(aa_in, machine, pro
     assert all(check["status"] == "pass" for check in checks)
 
 
+def test_a_uv_python_that_differs_from_the_pin_does_not_fail_lockfile(aa_in, machine, project):
+    # setup-uv sets UV_PYTHON in CI, and a developer may set it too.
+    env = {**machine.full().env, "UV_PYTHON": "3.14"}
+
+    result = aa_in(project, "doctor", "--json", env=env)
+
+    assert checks_by_id(json.loads(result.stdout))["lockfile"]["status"] == "pass", result.stdout
+    assert result.exit_code == 0
+
+
 def test_doctor_in_a_lib_project_made_by_init_passes_every_check(aa_in, machine, tmp_path):
     machine.full()
     made = aa_in(tmp_path, "init", "demo", "--lib", "--json", env=machine.env)
