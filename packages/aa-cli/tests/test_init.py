@@ -390,10 +390,10 @@ def test_init_in_human_mode_says_where_the_project_is_and_what_kind(aa, machine,
 GITHUB_URL = "https://github.com/test-user/demo"
 
 
-def github_machine(machine, **gh):
-    """What ``aa init --github`` needs: a local machine plus a fake gh."""
+def github_machine(machine, **gh_options):
+    """What ``aa init --github`` needs: a local machine plus a fake gh with ``gh_options``."""
     machine = local_machine(machine)
-    machine.add_gh(**gh)
+    machine.add_gh(**gh_options)
     return machine
 
 
@@ -457,14 +457,15 @@ def test_public_without_github_is_a_usage_error_and_creates_nothing(aa, machine,
 
 
 @pytest.mark.parametrize(
-    ("gh", "failed"),
-    [("missing", ["gh", "gh_auth"]), ("signed-out", ["gh_auth"])],
+    ("gh_on_path", "failed"),
+    [(False, ["gh", "gh_auth"]), (True, ["gh_auth"])],
+    ids=["missing", "signed-out"],
 )
 def test_init_github_without_a_signed_in_gh_fails_preflight_before_creating_anything(
-    aa, machine, tmp_path, gh, failed
+    aa, machine, tmp_path, gh_on_path, failed
 ):
     machine = local_machine(machine)
-    if gh == "signed-out":
+    if gh_on_path:
         machine.add_gh(signed_in=False)
 
     result = aa("init", "demo", "--github", "--json", env=machine.env)
@@ -496,3 +497,27 @@ def test_a_failed_repo_creation_keeps_the_project_and_gives_the_gh_command_to_re
     assert error["fix"].startswith("gh repo create demo ")
     assert "--source ." in error["fix"]
     assert str(created.project.resolve()) in error["message"]
+
+
+def test_a_failed_push_after_the_repo_was_created_gives_the_push_to_rerun(aa_in, machine, tmp_path):
+    machine = github_machine(machine, push_fails=True)
+
+    created = init(aa_in, tmp_path, machine, "--github")
+
+    assert created.result.exit_code == 1
+    error = created.envelope["error"]
+    assert error["code"] == "step_failed"
+    assert "exit status 128" in error["message"]
+    assert str(created.project.resolve()) in error["message"]
+    # gh repo create would fail again now that the repo exists; only the push is left.
+    assert error["fix"] == "git push --set-upstream origin main"
+    assert created.git("log", "--format=%s").splitlines() == [COMMIT_MESSAGE]
+
+
+def test_init_github_asks_gh_for_the_url_when_repo_create_prints_none(aa_in, machine, tmp_path):
+    machine = github_machine(machine, prints_url=False)
+
+    created = init(aa_in, tmp_path, machine, "--github")
+
+    assert created.result.exit_code == 0, created.result.output
+    assert created.envelope["data"]["github_url"] == GITHUB_URL

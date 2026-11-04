@@ -17,6 +17,8 @@ PACKAGE_DIR = Path(__file__).resolve().parents[1]
 FAKE_GH = r"""
 import json
 import os
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -34,7 +36,17 @@ if sys.argv[1:3] == ["repo", "create"]:
     if state["repo_create_fails"]:
         print("GraphQL: Name already exists on this account (createRepository)", file=sys.stderr)
         sys.exit(1)
-    print(f"https://github.com/test-user/{sys.argv[3]}")
+    # Like gh: the repo exists and is the origin remote before the push runs.
+    url = f"https://github.com/test-user/{sys.argv[3]}"
+    subprocess.run([shutil.which("git"), "remote", "add", "origin", url + ".git"], check=True)
+    if state["push_fails"]:
+        print("failed to run git: exit status 128", file=sys.stderr)
+        sys.exit(1)
+    if state["prints_url"]:
+        print(url)
+    sys.exit(0)
+if sys.argv[1:] == ["repo", "view", "--json", "url", "--jq", ".url"]:
+    print(f"https://github.com/test-user/{Path.cwd().name}")
     sys.exit(0)
 print(f"fake gh: unsupported arguments {sys.argv[1:]}", file=sys.stderr)
 sys.exit(2)
@@ -110,13 +122,27 @@ class Machine:
         (self.bin / "old_git.py").write_text(OLD_GIT.format(real=real))
         self._write_shim("git", [sys.executable, str(self.bin / "old_git.py")])
 
-    def add_gh(self, signed_in: bool = True, repo_create_fails: bool = False) -> None:
+    def add_gh(
+        self,
+        signed_in: bool = True,
+        repo_create_fails: bool = False,
+        push_fails: bool = False,
+        prints_url: bool = True,
+    ) -> None:
         """Put a fake gh on PATH, signed in or signed out, that records every call.
 
-        ``gh repo create <name>`` prints the new repo's URL, or fails when
-        ``repo_create_fails`` is set.
+        ``gh repo create <name>`` adds the new repo as the origin remote and
+        prints its URL. ``repo_create_fails`` makes it fail before that,
+        ``push_fails`` makes it fail after adding the remote, and
+        ``prints_url=False`` makes it print nothing (``gh repo view`` still
+        gives the URL).
         """
-        state = {"signed_in": signed_in, "repo_create_fails": repo_create_fails}
+        state = {
+            "signed_in": signed_in,
+            "repo_create_fails": repo_create_fails,
+            "push_fails": push_fails,
+            "prints_url": prints_url,
+        }
         (self.bin / "fake_gh.py").write_text(FAKE_GH)
         (self.bin / "gh-state.json").write_text(json.dumps(state))
         self._write_shim("gh", [sys.executable, str(self.bin / "fake_gh.py")])
