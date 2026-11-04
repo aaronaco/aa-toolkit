@@ -132,7 +132,9 @@ def _git_identity() -> Check:
 
 
 def _gh_auth() -> Check:
-    _run("gh", "auth", "status", "--hostname", "github.com")
+    if _run("gh", "auth", "status", "--hostname", "github.com").returncode != 0:
+        message = "not signed in to github.com"
+        return Check("gh_auth", Scope.MACHINE, Status.FAIL, message, "gh auth login")
     return Check("gh_auth", Scope.MACHINE, Status.PASS, "signed in to github.com")
 
 

@@ -85,3 +85,31 @@ def test_missing_git_identity_fails_with_the_git_config_commands(aa, machine, na
     assert check["status"] == "fail"
     for key in missing:
         assert f"git config --global {key}" in check["fix"]
+
+
+def test_missing_gh_fails_gh_and_points_gh_auth_at_it(aa, machine):
+    machine.add_real("uv")
+    machine.add_real("git")
+    machine.set_identity()
+
+    result = aa("doctor", "--json", env=machine.env)
+
+    assert result.exit_code == 1
+    checks = checks_by_id(json.loads(result.stdout))
+    assert checks["gh"]["status"] == "fail"
+    assert checks["gh"]["fix"]
+    assert checks["gh_auth"]["status"] == "fail"
+    assert "gh check" in checks["gh_auth"]["message"]
+
+
+def test_signed_out_gh_fails_gh_auth_with_the_sign_in_command(aa, machine):
+    machine.full()
+    machine.add_gh(signed_in=False)
+
+    result = aa("doctor", "--json", env=machine.env)
+
+    assert result.exit_code == 1
+    checks = checks_by_id(json.loads(result.stdout))
+    assert checks["gh"]["status"] == "pass"
+    assert checks["gh_auth"]["status"] == "fail"
+    assert checks["gh_auth"]["fix"] == "gh auth login"
