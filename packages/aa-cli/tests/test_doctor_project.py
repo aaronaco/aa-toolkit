@@ -86,3 +86,24 @@ def test_a_missing_or_unknown_kind_fails_aa_config_with_a_fix(aa_in, machine, pr
     assert checks["aa_config"]["status"] == "fail"
     assert "kind" in checks["aa_config"]["fix"]
     assert all(checks[check_id]["status"] == "pass" for check_id in PROJECT_IDS[1:])
+
+
+def test_a_deleted_python_version_fails_with_the_uv_pin_command(aa_in, machine, project):
+    (project / ".python-version").unlink()
+
+    result = aa_in(project, "doctor", "--json", env=machine.full().env)
+
+    assert result.exit_code == 1
+    checks = checks_by_id(json.loads(result.stdout))
+    assert checks["python_version"]["status"] == "fail"
+    assert checks["python_version"]["fix"] == "uv python pin 3.15"
+    assert checks["agents_md"]["status"] == "pass"
+
+
+def test_from_a_subfolder_a_fix_first_changes_to_the_project_folder(aa_in, machine, project):
+    (project / ".python-version").unlink()
+
+    result = aa_in(project / "src" / "demo", "doctor", "--json", env=machine.full().env)
+
+    fix = checks_by_id(json.loads(result.stdout))["python_version"]["fix"]
+    assert fix == f'cd "{project}"; uv python pin 3.15'

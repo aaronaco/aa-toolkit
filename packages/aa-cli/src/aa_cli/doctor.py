@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from aa_cli.git import machine_config
-from aa_cli.init import CI_WORKFLOW, Kind
+from aa_cli.init import CI_WORKFLOW, PYTHON_VERSION, Kind
 from aa_cli.process import run
 
 log = logging.getLogger("aa")
@@ -73,13 +73,24 @@ def project_checks(start: Path, uv: Check) -> list[Check]:
     root = find_project(start)
     if root is None:
         return [Check("project", Scope.PROJECT, Status.INFO, "not a project")]
+    project = _Project(root, start)
     return [
-        _aa_config(root),
-        _python_version(root),
-        _needs(uv, "lockfile", Scope.PROJECT) or _lockfile(root),
-        _file_exists("agents_md", root, "AGENTS.md"),
-        _file_exists("ci", root, CI_WORKFLOW),
+        _aa_config(project),
+        _python_version(project),
+        _needs(uv, "lockfile", Scope.PROJECT) or _lockfile(project),
+        _file_exists("agents_md", project, "AGENTS.md"),
+        _file_exists("ci", project, CI_WORKFLOW),
     ]
+
+
+@dataclass(frozen=True)
+class _Project:
+    root: Path
+    here: Path  # the folder aa ran in: the root or a folder under it
+
+    def command(self, command: str) -> str:
+        """A fix ``command`` that runs in the root, from the folder aa ran in."""
+        return command if self.here == self.root else f'cd "{self.root}"; {command}'
 
 
 def find_project(start: Path) -> Path | None:
@@ -155,8 +166,8 @@ def _git_identity() -> Check:
     return Check("git_identity", Scope.MACHINE, Status.PASS, message)
 
 
-def _aa_config(root: Path) -> Check:
-    pyproject = root / "pyproject.toml"
+def _aa_config(project: _Project) -> Check:
+    pyproject = project.root / "pyproject.toml"
     aa = tomllib.loads(pyproject.read_text(encoding="utf-8"))["tool"]["aa"]
     kind = aa.get("kind") if isinstance(aa, dict) else None
     if isinstance(kind, str) and kind in Kind:
@@ -172,17 +183,21 @@ def _aa_config(root: Path) -> Check:
     return Check("aa_config", Scope.PROJECT, Status.FAIL, message, fix)
 
 
-def _python_version(root: Path) -> Check:
-    pinned = (root / ".python-version").read_text(encoding="utf-8").strip()
+def _python_version(project: _Project) -> Check:
+    pin = project.root / ".python-version"
+    if not pin.is_file():
+        fix = project.command(f"uv python pin {PYTHON_VERSION}")
+        return Check("python_version", Scope.PROJECT, Status.FAIL, ".python-version not found", fix)
+    pinned = pin.read_text(encoding="utf-8").strip()
     return Check("python_version", Scope.PROJECT, Status.PASS, f"pins Python {pinned}")
 
 
-def _lockfile(root: Path) -> Check:
-    run("uv", "lock", "--check", cwd=root)
+def _lockfile(project: _Project) -> Check:
+    run("uv", "lock", "--check", cwd=project.root)
     return Check("lockfile", Scope.PROJECT, Status.PASS, "uv.lock is in sync with pyproject.toml")
 
 
-def _file_exists(check_id: str, root: Path, path: str) -> Check:
+def _file_exists(check_id: str, project: _Project, path: str) -> Check:
     return Check(check_id, Scope.PROJECT, Status.PASS, f"{path} found")
 
 
