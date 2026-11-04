@@ -16,8 +16,9 @@ def _no_ambient_json(monkeypatch):
 
 
 @pytest.fixture
-def aa():
-    """Run the aa command in process and return the result."""
+def aa(tmp_path, monkeypatch):
+    """Run the aa command in process, from an empty temporary folder, and return the result."""
+    monkeypatch.chdir(tmp_path)
 
     def run(*args: str, env: dict[str, str] | None = None):
         return CliRunner().invoke(app, list(args), env=env)
