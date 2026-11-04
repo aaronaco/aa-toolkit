@@ -141,6 +141,18 @@ def test_a_project_path_with_shell_characters_stays_literal_in_the_cd(
     assert fix == f"cd '{project}'; uv python pin 3.15"
 
 
+def test_a_pyproject_saved_with_a_byte_order_mark_is_still_a_project(aa_in, machine, project):
+    # Windows PowerShell 5.1 writes one with Set-Content -Encoding utf8.
+    pyproject = project / "pyproject.toml"
+    pyproject.write_text(pyproject.read_text(encoding="utf-8"), encoding="utf-8-sig")
+
+    result = aa_in(project, "doctor", "--json", env=machine.full().env)
+
+    checks = checks_by_id(json.loads(result.stdout))
+    assert "project" not in checks
+    assert checks["aa_config"]["status"] == "pass"
+
+
 def test_dependencies_changed_without_relocking_fail_lockfile_with_uv_lock(aa_in, machine, project):
     pyproject = project / "pyproject.toml"
     text = pyproject.read_text(encoding="utf-8")

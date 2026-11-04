@@ -104,14 +104,18 @@ def find_project(start: Path) -> Path | None:
     for folder in (start, *start.parents):
         pyproject = folder / "pyproject.toml"
         if pyproject.is_file():
-            try:
-                config = tomllib.loads(pyproject.read_text(encoding="utf-8"))
-            except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
-                log.debug("Cannot read %s: %s", pyproject, exc)
-                return None
-            tool = config.get("tool")
+            tool = (_read_pyproject(pyproject) or {}).get("tool")
             return folder if isinstance(tool, dict) and "aa" in tool else None
     return None
+
+
+def _read_pyproject(pyproject: Path) -> dict[str, Any] | None:
+    """The parsed pyproject, or None when it can't be read. A leading BOM is allowed."""
+    try:
+        return tomllib.loads(pyproject.read_text(encoding="utf-8-sig"))
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+        log.debug("Cannot read %s: %s", pyproject, exc)
+        return None
 
 
 _MARKS = {Status.PASS: "[ok]  ", Status.FAIL: "[fail]", Status.INFO: "[info]"}
@@ -174,11 +178,12 @@ def _git_identity() -> Check:
 
 def _aa_config(project: _Project) -> Check:
     pyproject = project.root / "pyproject.toml"
-    aa = tomllib.loads(pyproject.read_text(encoding="utf-8"))["tool"]["aa"]
+    # find_project already read this file and found [tool.aa] in it.
+    aa = (_read_pyproject(pyproject) or {}).get("tool", {}).get("aa")
     kind = aa.get("kind") if isinstance(aa, dict) else None
     if isinstance(kind, str) and kind in Kind:
         return Check("aa_config", Scope.PROJECT, Status.PASS, f"kind is {kind}")
-    kinds = " or ".join(f'"{kind}"' for kind in Kind)
+    kinds = " or ".join(f'"{choice}"' for choice in Kind)
     fix = f"Set kind = {kinds} under [tool.aa] in {pyproject}"
     if not isinstance(aa, dict):
         message = "[tool.aa] is not a table"
