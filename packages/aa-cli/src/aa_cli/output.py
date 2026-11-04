@@ -9,9 +9,9 @@ import json
 import logging
 import sys
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import IntEnum
-from typing import Annotated, Any
+from typing import Annotated, Any, TextIO
 
 import typer
 
@@ -34,6 +34,9 @@ class Output:
     json: bool
     verbose: bool
     help: bool = False
+    # The stdout aa started with. Envelopes always go here, so capturing help
+    # text never captures an envelope too.
+    stdout: TextIO = field(default_factory=lambda: sys.stdout, repr=False, compare=False)
 
     @classmethod
     def from_args(cls, args: Sequence[str], environ: Mapping[str, str]) -> Output:
@@ -53,7 +56,7 @@ class Output:
 
     def success(self, data: dict[str, Any], human: str) -> None:
         if self.json:
-            _write_json({"ok": True, "data": data})
+            self._write_json({"ok": True, "data": data})
         else:
             typer.echo(human)
 
@@ -71,11 +74,14 @@ class Output:
             }
             if data is not None:
                 envelope["data"] = data
-            _write_json(envelope)
+            self._write_json(envelope)
         else:
             typer.echo(f"Error: {message}", err=True)
             if fix:
                 typer.echo(f"Fix: {fix}", err=True)
+
+    def _write_json(self, envelope: dict[str, Any]) -> None:
+        typer.echo(json.dumps(envelope), file=self.stdout)
 
 
 def configure_logging(verbose: bool) -> None:
@@ -88,7 +94,3 @@ def configure_logging(verbose: bool) -> None:
     logger.addHandler(handler)
     logger.setLevel(logging.DEBUG if verbose else logging.WARNING)
     logger.propagate = False
-
-
-def _write_json(envelope: dict[str, Any]) -> None:
-    typer.echo(json.dumps(envelope))

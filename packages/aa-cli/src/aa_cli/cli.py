@@ -62,8 +62,10 @@ class AaGroup(TyperGroup):
 def _help_as_envelope(out: Output) -> Iterator[None]:
     """In JSON mode, wrap the help text in a success envelope.
 
-    If the command fails instead, the captured text is dropped and the error
-    handlers write their own envelope.
+    Envelopes bypass the capture (see ``Output.stdout``), so only help text
+    lands in it. Nothing captured means help was never shown, for example
+    because an earlier ``--version`` already answered. If the command fails,
+    the captured text is dropped and the error handlers write their own envelope.
     """
     if not (out.json and out.help):
         yield
@@ -71,6 +73,8 @@ def _help_as_envelope(out: Output) -> Iterator[None]:
     captured = io.StringIO()
     with contextlib.redirect_stdout(captured):
         yield
+    if not captured.getvalue():
+        return
     # Typer colors help when FORCE_COLOR, PY_COLORS or GITHUB_ACTIONS is set, even
     # into a buffer; JSON consumers get plain text.
     plain = _TERMINAL_ESCAPE.sub("", captured.getvalue())
