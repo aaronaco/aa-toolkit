@@ -171,13 +171,25 @@ def test_the_history_is_one_initial_commit_on_main_with_a_clean_tree(cli_project
 @pytest.mark.parametrize("kind", ["cli_project", "lib_project"])
 def test_the_created_project_passes_its_own_tests_lint_and_format_check(request, kind):
     project = request.getfixturevalue(kind).project
+    # As the project's own CI runs them: no Python override, so .python-version decides.
+    env = {key: value for key, value in os.environ.items() if key != "UV_PYTHON"}
     for command in (
         ["uv", "run", "pytest"],
         ["uv", "run", "ruff", "check", "."],
         ["uv", "run", "ruff", "format", "--check", "."],
     ):
-        result = subprocess.run(command, cwd=project, capture_output=True, text=True)
+        result = subprocess.run(command, cwd=project, env=env, capture_output=True, text=True)
         assert result.returncode == 0, f"{command}: {result.stdout}{result.stderr}"
+
+
+def test_init_pins_python_3_15_even_when_uv_python_asks_for_another(aa_in, machine, tmp_path):
+    machine = local_machine(machine)
+    result = aa_in(tmp_path, "init", "demo", "--json", env={**machine.env, "UV_PYTHON": "3.14"})
+
+    assert result.exit_code == 0, result.output
+    project = tmp_path / "demo"
+    assert (project / ".python-version").read_text().strip() == "3.15"
+    assert (project / "uv.lock").is_file()
 
 
 def test_init_with_both_cli_and_lib_is_a_usage_error_and_creates_nothing(aa, machine, tmp_path):

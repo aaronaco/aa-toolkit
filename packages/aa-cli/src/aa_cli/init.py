@@ -60,7 +60,19 @@ def create_project(target: Path, kind: Kind, license_choice: License) -> list[st
         "none",
     )
     _add_aa_config(target, kind)
-    _step("add dev dependencies", target, "uv", "add", "--dev", "ruff", "pytest")
+    # --python wins over a UV_PYTHON set in the environment, which would
+    # otherwise override the project's pin.
+    _step(
+        "add dev dependencies",
+        target,
+        "uv",
+        "add",
+        "--python",
+        PYTHON_VERSION,
+        "--dev",
+        "ruff",
+        "pytest",
+    )
     _write_files(target, kind, license_choice)
     _step("initial commit", target, "git", "add", "--all")
     _step("initial commit", target, "git", "commit", "--quiet", "--message", COMMIT_MESSAGE)
