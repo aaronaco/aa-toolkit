@@ -1,0 +1,88 @@
+"""``aa doctor`` inside a project: the project checks, against projects made by ``aa init``."""
+
+import json
+import shutil
+from pathlib import Path
+
+import pytest
+
+MACHINE_IDS = ["uv", "git", "git_identity", "gh", "gh_auth"]
+PROJECT_IDS = ["aa_config", "python_version", "lockfile", "agents_md", "ci"]
+
+
+def checks_by_id(envelope):
+    return {check["id"]: check for check in envelope["data"]["checks"]}
+
+
+@pytest.fixture(scope="module")
+def made_project(tmp_path_factory, new_machine, aa_in) -> Path:
+    """One project made by ``aa init``, shared by the tests in this module. Never change it."""
+    folder = tmp_path_factory.mktemp("made")
+    result = aa_in(folder, "init", "demo", "--json", env=new_machine().full().env)
+    assert result.exit_code == 0, result.output
+    return folder / "demo"
+
+
+@pytest.fixture
+def project(made_project, tmp_path) -> Path:
+    """A copy of the made project, with its git history, that a test may change."""
+    copy = tmp_path / "demo"
+    shutil.copytree(made_project, copy, ignore=shutil.ignore_patterns(".venv"))
+    return copy
+
+
+def test_doctor_in_a_project_made_by_init_passes_every_check(aa_in, machine, project):
+    result = aa_in(project, "doctor", "--json", env=machine.full().env)
+
+    assert result.exit_code == 0, result.output
+    envelope = json.loads(result.stdout)
+    assert envelope["ok"] is True
+    checks = envelope["data"]["checks"]
+    assert [check["id"] for check in checks] == [*MACHINE_IDS, *PROJECT_IDS]
+    assert [check["scope"] for check in checks] == ["machine"] * 5 + ["project"] * 5
+    assert all(check["status"] == "pass" for check in checks)
+
+
+def test_doctor_from_a_subfolder_finds_the_project_and_runs_its_checks(aa_in, machine, project):
+    result = aa_in(project / "src" / "demo", "doctor", "--json", env=machine.full().env)
+
+    assert result.exit_code == 0, result.output
+    checks = checks_by_id(json.loads(result.stdout))
+    assert "project" not in checks
+    assert all(checks[check_id]["status"] == "pass" for check_id in PROJECT_IDS)
+
+
+def test_human_output_groups_machine_and_project_checks_under_headings(aa_in, machine, project):
+    result = aa_in(project, "doctor", env=machine.full().env)
+
+    assert result.exit_code == 0, result.output
+    lines = result.stdout.splitlines()
+    machine_heading, project_heading = lines.index("Machine"), lines.index("Project")
+    assert machine_heading < project_heading
+    for check_id in MACHINE_IDS:
+        line = next(i for i, text in enumerate(lines) if f" {check_id}:" in text)
+        assert machine_heading < line < project_heading, check_id
+    for check_id in PROJECT_IDS:
+        line = next(i for i, text in enumerate(lines) if f" {check_id}:" in text)
+        assert project_heading < line and "[ok]" in lines[line], check_id
+
+
+@pytest.mark.parametrize(
+    "aa_section",
+    ["[tool.aa]\n", '[tool.aa]\nkind = "app"\n', "[tool.aa]\nkind = 1\n", '[tool]\naa = "cli"\n'],
+    ids=["missing-kind", "unknown-kind", "kind-not-a-string", "not-a-table"],
+)
+def test_a_missing_or_unknown_kind_fails_aa_config_with_a_fix(aa_in, machine, project, aa_section):
+    pyproject = project / "pyproject.toml"
+    text = pyproject.read_text(encoding="utf-8")
+    pyproject.write_text(text.replace('[tool.aa]\nkind = "cli"\n', aa_section), encoding="utf-8")
+
+    result = aa_in(project, "doctor", "--json", env=machine.full().env)
+
+    assert result.exit_code == 1
+    envelope = json.loads(result.stdout)
+    assert envelope["error"]["code"] == "checks_failed"
+    checks = checks_by_id(envelope)
+    assert checks["aa_config"]["status"] == "fail"
+    assert "kind" in checks["aa_config"]["fix"]
+    assert all(checks[check_id]["status"] == "pass" for check_id in PROJECT_IDS[1:])

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from aa_cli.git import machine_config
+from aa_cli.init import CI_WORKFLOW, Kind
 from aa_cli.process import run
 
 log = logging.getLogger("aa")
@@ -53,19 +54,32 @@ def preflight_checks() -> list[Check]:
     return [uv, git, git_identity]
 
 
-def _needs(dependency: Check, check_id: str) -> Check | None:
-    """A failure pointing at ``dependency`` when it failed, else None so the check runs."""
+def _needs(dependency: Check, check_id: str, scope: Scope | None = None) -> Check | None:
+    """A failure pointing at ``dependency`` when it failed, else None so the check runs.
+
+    The failure is in ``scope``, by default the dependency's own.
+    """
     if dependency.status is not Status.FAIL:
         return None
     message = f"needs the {dependency.id} check, which failed"
-    return Check(check_id, dependency.scope, Status.FAIL, message, dependency.fix)
+    return Check(check_id, scope or dependency.scope, Status.FAIL, message, dependency.fix)
 
 
-def project_checks(start: Path) -> list[Check]:
-    """The project's checks, or a single "not a project" result outside one."""
-    if find_project(start) is None:
+def project_checks(start: Path, uv: Check) -> list[Check]:
+    """The project's checks, in order, or a single "not a project" result outside one.
+
+    ``uv`` is the machine's uv check, which the lockfile check depends on.
+    """
+    root = find_project(start)
+    if root is None:
         return [Check("project", Scope.PROJECT, Status.INFO, "not a project")]
-    return []
+    return [
+        _aa_config(root),
+        _python_version(root),
+        _needs(uv, "lockfile", Scope.PROJECT) or _lockfile(root),
+        _file_exists("agents_md", root, "AGENTS.md"),
+        _file_exists("ci", root, CI_WORKFLOW),
+    ]
 
 
 def find_project(start: Path) -> Path | None:
@@ -139,6 +153,37 @@ def _git_identity() -> Check:
         return Check("git_identity", Scope.MACHINE, Status.FAIL, message, fix)
     message = f"{values['user.name']} <{values['user.email']}>"
     return Check("git_identity", Scope.MACHINE, Status.PASS, message)
+
+
+def _aa_config(root: Path) -> Check:
+    pyproject = root / "pyproject.toml"
+    aa = tomllib.loads(pyproject.read_text(encoding="utf-8"))["tool"]["aa"]
+    kind = aa.get("kind") if isinstance(aa, dict) else None
+    if isinstance(kind, str) and kind in Kind:
+        return Check("aa_config", Scope.PROJECT, Status.PASS, f"kind is {kind}")
+    kinds = " or ".join(f'"{kind}"' for kind in Kind)
+    fix = f"Set kind = {kinds} under [tool.aa] in {pyproject}"
+    if not isinstance(aa, dict):
+        message = "[tool.aa] is not a table"
+    elif kind is None:
+        message = "[tool.aa] has no kind"
+    else:
+        message = f"kind {kind!r} is not one of {', '.join(Kind)}"
+    return Check("aa_config", Scope.PROJECT, Status.FAIL, message, fix)
+
+
+def _python_version(root: Path) -> Check:
+    pinned = (root / ".python-version").read_text(encoding="utf-8").strip()
+    return Check("python_version", Scope.PROJECT, Status.PASS, f"pins Python {pinned}")
+
+
+def _lockfile(root: Path) -> Check:
+    run("uv", "lock", "--check", cwd=root)
+    return Check("lockfile", Scope.PROJECT, Status.PASS, "uv.lock is in sync with pyproject.toml")
+
+
+def _file_exists(check_id: str, root: Path, path: str) -> Check:
+    return Check(check_id, Scope.PROJECT, Status.PASS, f"{path} found")
 
 
 def _gh_auth() -> Check:
