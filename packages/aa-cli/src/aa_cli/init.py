@@ -20,6 +20,7 @@ PYTHON_VERSION = "3.15"
 COMMIT_MESSAGE = "chore: initialize project with aa"
 
 _PLACEHOLDER = re.compile(r"\{\{(\w+)\}\}")
+_GITHUB_URL = re.compile(r"https://\S+")
 
 
 class Kind(StrEnum):
@@ -42,8 +43,9 @@ _KIND_TEMPLATES = {
 class StepFailed(Exception):
     """A step after preflight failed. The message names the step and the tool's error."""
 
-    def __init__(self, step: str, detail: str) -> None:
+    def __init__(self, step: str, detail: str, fix: str | None = None) -> None:
         super().__init__(f"step '{step}' failed: {detail}" if detail else f"step '{step}' failed")
+        self.fix = fix
 
 
 @dataclass(frozen=True)
@@ -141,6 +143,29 @@ def create_project(target: Path, kind: Kind, license_choice: License) -> list[st
     _step("initial commit", target, "git", "commit", "--quiet", "--message", COMMIT_MESSAGE)
     listed = _step("list files", target, "git", "ls-files")
     return sorted(listed.splitlines())
+
+
+def create_github_repo(target: Path, public: bool) -> str | None:
+    """Create the GitHub repo for the project in ``target``, push to it and return its URL."""
+    args = [
+        "repo",
+        "create",
+        target.name,
+        "--public" if public else "--private",
+        "--source",
+        ".",
+        "--push",
+    ]
+    log.debug("Step: create GitHub repo")
+    result = run("gh", *args, cwd=target)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip()
+        kept = f"The project at {target} is kept; run the fix from inside it."
+        fix = " ".join(["gh", *args])
+        raise StepFailed("create GitHub repo", f"{detail}\n{kept}" if detail else kept, fix=fix)
+    # Without a terminal, gh prints the new repo's URL on stdout.
+    url = _GITHUB_URL.search(result.stdout)
+    return url.group(0) if url else None
 
 
 def _step(step: str, cwd: Path, tool: str, *args: str) -> str:

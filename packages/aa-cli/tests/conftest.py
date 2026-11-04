@@ -4,6 +4,7 @@ import os
 import shutil
 import sys
 import tomllib
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -13,21 +14,40 @@ from aa_cli.cli import app
 
 PACKAGE_DIR = Path(__file__).resolve().parents[1]
 
-FAKE_GH = """\
+FAKE_GH = r"""
 import json
+import os
 import sys
 from pathlib import Path
 
-state = json.loads((Path(__file__).parent / "gh-state.json").read_text())
+here = Path(__file__).parent
+state = json.loads((here / "gh-state.json").read_text())
+with (here / "gh-calls.jsonl").open("a") as calls:
+    calls.write(json.dumps({"args": sys.argv[1:], "cwd": os.getcwd()}) + "\n")
 if sys.argv[1:3] == ["auth", "status"]:
     if state["signed_in"]:
         print("Logged in to github.com account test-user")
         sys.exit(0)
     print("You are not logged into any GitHub hosts.", file=sys.stderr)
     sys.exit(1)
+if sys.argv[1:3] == ["repo", "create"]:
+    if state["repo_create_fails"]:
+        print("GraphQL: Name already exists on this account (createRepository)", file=sys.stderr)
+        sys.exit(1)
+    print(f"https://github.com/test-user/{sys.argv[3]}")
+    sys.exit(0)
 print(f"fake gh: unsupported arguments {sys.argv[1:]}", file=sys.stderr)
 sys.exit(2)
 """
+
+
+@dataclass(frozen=True)
+class GhCall:
+    """One run of the fake gh: its arguments and the folder it ran in."""
+
+    args: list[str]
+    cwd: Path
+
 
 OLD_GIT = """\
 import subprocess
@@ -90,11 +110,24 @@ class Machine:
         (self.bin / "old_git.py").write_text(OLD_GIT.format(real=real))
         self._write_shim("git", [sys.executable, str(self.bin / "old_git.py")])
 
-    def add_gh(self, signed_in: bool = True) -> None:
-        """Put a fake gh on PATH, signed in or signed out."""
+    def add_gh(self, signed_in: bool = True, repo_create_fails: bool = False) -> None:
+        """Put a fake gh on PATH, signed in or signed out, that records every call.
+
+        ``gh repo create <name>`` prints the new repo's URL, or fails when
+        ``repo_create_fails`` is set.
+        """
+        state = {"signed_in": signed_in, "repo_create_fails": repo_create_fails}
         (self.bin / "fake_gh.py").write_text(FAKE_GH)
-        (self.bin / "gh-state.json").write_text(json.dumps({"signed_in": signed_in}))
+        (self.bin / "gh-state.json").write_text(json.dumps(state))
         self._write_shim("gh", [sys.executable, str(self.bin / "fake_gh.py")])
+
+    def gh_calls(self) -> list[GhCall]:
+        """Every call the fake gh got, in order."""
+        log = self.bin / "gh-calls.jsonl"
+        if not log.exists():
+            return []
+        calls = [json.loads(line) for line in log.read_text().splitlines()]
+        return [GhCall(call["args"], Path(call["cwd"])) for call in calls]
 
     def add_failing(self, name: str, message: str) -> None:
         """Put a tool on PATH that prints ``message`` to stderr and fails on every call."""

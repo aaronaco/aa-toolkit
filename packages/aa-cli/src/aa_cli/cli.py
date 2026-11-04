@@ -19,6 +19,7 @@ from aa_cli.init import (
     Kind,
     License,
     StepFailed,
+    create_github_repo,
     create_project,
     is_empty_folder_or_missing,
     outer_workspace_taking_in,
@@ -161,6 +162,12 @@ def init(
     license_choice: Annotated[
         License, typer.Option("--license", case_sensitive=False, help="The license to add.")
     ] = License.MIT,
+    github: Annotated[
+        bool, typer.Option("--github", help="Also create a private GitHub repo and push to it.")
+    ] = False,
+    public: Annotated[
+        bool, typer.Option("--public", help="Make the GitHub repo public. Needs --github.")
+    ] = False,
     json_output: JsonFlag = False,
     verbose: VerboseFlag = False,
 ) -> None:
@@ -168,6 +175,8 @@ def init(
     out: Output = ctx.obj
     if cli and lib:
         raise typer.BadParameter("use only one of them", ctx=ctx, param_hint="'--cli' / '--lib'")
+    if public and not github:
+        raise typer.BadParameter("only works with '--github'", ctx=ctx, param_hint="'--public'")
     kind = Kind.LIB if lib else Kind.CLI
     target = (Path.cwd() / name).resolve()
     if not is_empty_folder_or_missing(target):
@@ -178,7 +187,7 @@ def init(
         message = f"{target} would become a member of the uv workspace at {outer.root}"
         out.failure("target_in_workspace", message, fix=outer.fix)
         raise typer.Exit(ExitCode.PROBLEMS)
-    failed = [check for check in preflight_checks() if check.status is Status.FAIL]
+    failed = [check for check in preflight_checks(github) if check.status is Status.FAIL]
     if failed:
         message = f"preflight failed: {', '.join(check.id for check in failed)}"
         fix = "; ".join(dict.fromkeys(check.fix for check in failed if check.fix)) or None
@@ -187,12 +196,15 @@ def init(
         raise typer.Exit(ExitCode.PROBLEMS)
     try:
         created = create_project(target, kind, license_choice)
+        github_url = create_github_repo(target, public) if github else None
     except StepFailed as exc:
-        out.failure("step_failed", str(exc))
+        out.failure("step_failed", str(exc), fix=exc.fix)
         raise typer.Exit(ExitCode.PROBLEMS) from exc
-    data = {"path": str(target), "kind": str(kind), "files": created, "github_url": None}
-    human = "\n".join([f"Created a {kind} project at {target}", *(f"  {f}" for f in created)])
-    out.success(data, human=human)
+    data = {"path": str(target), "kind": str(kind), "files": created, "github_url": github_url}
+    lines = [f"Created a {kind} project at {target}", *(f"  {f}" for f in created)]
+    if github_url:
+        lines.append(f"GitHub repo: {github_url}")
+    out.success(data, human="\n".join(lines))
 
 
 @app.command(hidden=True)
