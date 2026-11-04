@@ -78,8 +78,8 @@ def project_checks(start: Path, uv: Check) -> list[Check]:
         _aa_config(project),
         _python_version(project),
         _needs(uv, "lockfile", Scope.PROJECT) or _lockfile(project),
-        _file_exists("agents_md", project, "AGENTS.md"),
-        _file_exists("ci", project, CI_WORKFLOW),
+        _file_exists("agents_md", project, "AGENTS.md", "how to install, test, lint and commit"),
+        _file_exists("ci", project, CI_WORKFLOW, "a workflow that runs ruff and pytest"),
     ]
 
 
@@ -209,8 +209,21 @@ def _lockfile(project: _Project) -> Check:
     return Check("lockfile", Scope.PROJECT, Status.FAIL, message, fix)
 
 
-def _file_exists(check_id: str, project: _Project, path: str) -> Check:
-    return Check(check_id, Scope.PROJECT, Status.PASS, f"{path} found")
+def _file_exists(check_id: str, project: _Project, path: str, content: str) -> Check:
+    """Pass when ``path`` exists. The fix restores it from git, or else says to write it."""
+    if (project.root / path).is_file():
+        return Check(check_id, Scope.PROJECT, Status.PASS, f"{path} found")
+    if _in_last_commit(project.root, path):
+        fix = project.command(f"git checkout HEAD -- {path}")
+    else:
+        fix = f"Create {path} in {project.root} with {content}"
+    return Check(check_id, Scope.PROJECT, Status.FAIL, f"{path} not found", fix)
+
+
+def _in_last_commit(root: Path, path: str) -> bool:
+    if shutil.which("git") is None:
+        return False
+    return run("git", "cat-file", "-e", f"HEAD:./{path}", cwd=root).returncode == 0
 
 
 def _gh_auth() -> Check:

@@ -1,7 +1,10 @@
 """``aa doctor`` inside a project: the project checks, against projects made by ``aa init``."""
 
 import json
+import os
+import shlex
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -109,9 +112,7 @@ def test_from_a_subfolder_a_fix_first_changes_to_the_project_folder(aa_in, machi
     assert fix == f'cd "{project}"; uv python pin 3.15'
 
 
-def test_dependencies_changed_without_relocking_fail_lockfile_with_uv_lock(
-    aa_in, machine, project
-):
+def test_dependencies_changed_without_relocking_fail_lockfile_with_uv_lock(aa_in, machine, project):
     pyproject = project / "pyproject.toml"
     text = pyproject.read_text(encoding="utf-8")
     assert "dependencies = []" in text
@@ -150,3 +151,56 @@ def test_a_lock_check_uv_cannot_run_fails_lockfile_with_uvs_error(aa_in, machine
     assert check["status"] == "fail"
     assert "out of sync" not in check["message"]
     assert "not a spec!" in check["message"]
+
+
+def test_without_uv_lockfile_fails_pointing_at_the_uv_check(aa_in, machine, project):
+    machine.add_real("git")
+    machine.add_gh(signed_in=True)
+    machine.set_identity()
+
+    result = aa_in(project, "doctor", "--json", env=machine.env)
+
+    assert result.exit_code == 1
+    checks = checks_by_id(json.loads(result.stdout))
+    assert checks["uv"]["status"] == "fail"
+    assert checks["lockfile"]["status"] == "fail"
+    assert checks["lockfile"]["scope"] == "project"
+    assert "uv check" in checks["lockfile"]["message"]
+    assert checks["lockfile"]["fix"] == checks["uv"]["fix"]
+    for check_id in ["aa_config", "python_version", "agents_md", "ci"]:
+        assert checks[check_id]["status"] == "pass", check_id
+
+
+@pytest.mark.parametrize(
+    ("check_id", "path"),
+    [("agents_md", "AGENTS.md"), ("ci", ".github/workflows/ci.yml")],
+    ids=["agents_md", "ci"],
+)
+def test_a_deleted_file_fails_its_check_and_the_fix_restores_it(
+    aa_in, machine, project, check_id, path
+):
+    machine.full()
+    (project / path).unlink()
+
+    result = aa_in(project, "doctor", "--json", env=machine.env)
+
+    assert result.exit_code == 1
+    checks = checks_by_id(json.loads(result.stdout))
+    assert checks[check_id]["status"] == "fail"
+    others = [other for other in PROJECT_IDS if other != check_id]
+    assert all(checks[other]["status"] == "pass" for other in others)
+    env = {**os.environ, **{k: v for k, v in machine.env.items() if k != "PATH"}}
+    subprocess.run(shlex.split(checks[check_id]["fix"]), cwd=project, env=env, check=True)
+    assert aa_in(project, "doctor", "--json", env=machine.env).exit_code == 0
+
+
+def test_a_file_missing_from_git_too_gets_a_fix_that_says_to_write_it(aa_in, machine, project):
+    # Git keeps its objects read-only, which Windows will not delete as they are.
+    shutil.rmtree(project / ".git", onexc=lambda func, path, _: (os.chmod(path, 0o700), func(path)))
+    (project / "AGENTS.md").unlink()
+
+    result = aa_in(project, "doctor", "--json", env=machine.full().env)
+
+    check = checks_by_id(json.loads(result.stdout))["agents_md"]
+    assert check["status"] == "fail"
+    assert check["fix"].startswith("Create AGENTS.md")
