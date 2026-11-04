@@ -23,15 +23,24 @@ from aa_cli.doctor import (
     render,
 )
 from aa_cli.init import (
+    NAME_RULE,
     Kind,
     License,
     StepFailed,
     create_github_repo,
     create_project,
     is_empty_folder_or_missing,
+    is_valid_name,
     outer_workspace_taking_in,
 )
-from aa_cli.output import ExitCode, JsonFlag, Output, VerboseFlag, configure_logging
+from aa_cli.output import (
+    Aborted,
+    ExitCode,
+    JsonFlag,
+    Output,
+    VerboseFlag,
+    configure_logging,
+)
 
 log = logging.getLogger("aa")
 
@@ -71,9 +80,19 @@ class AaGroup(TyperGroup):
                 code = _report_unexpected_error(out, exc)
             else:
                 code = _report_usage_error(out, exc)
+        except Aborted as exc:
+            code = _report_aborted(out, exc)
         except Exception as exc:
             code = _report_unexpected_error(out, exc)
         sys.exit(code if isinstance(code, int) else ExitCode.OK)
+
+    def invoke(self, ctx: typer.Context) -> Any:
+        # Typer turns KeyboardInterrupt into a bare exit 130 with nothing on
+        # stdout; catch it first so it is reported like any other failure.
+        try:
+            return super().invoke(ctx)
+        except KeyboardInterrupt as exc:
+            raise Aborted() from exc
 
 
 @contextlib.contextmanager
@@ -108,6 +127,11 @@ def _report_usage_error(out: Output, exc: typer.TyperException) -> ExitCode:
     else:
         exc.show()  # type: ignore[attr-defined]  # usage errors carry Click's show()
     return ExitCode.USAGE
+
+
+def _report_aborted(out: Output, exc: Aborted) -> ExitCode:
+    out.failure("aborted", str(exc))
+    return ExitCode.ABORTED
 
 
 def _report_unexpected_error(out: Output, exc: Exception) -> ExitCode:
@@ -184,6 +208,7 @@ def init(
         raise typer.BadParameter("use only one of them", ctx=ctx, param_hint="'--cli' / '--lib'")
     if public and not github:
         raise typer.BadParameter("only works with '--github'", ctx=ctx, param_hint="'--public'")
+    _refuse_bad_name(ctx, name)
     kind = Kind.LIB if lib else Kind.CLI
     target = (Path.cwd() / name).resolve()
     if not is_empty_folder_or_missing(target):
@@ -208,11 +233,25 @@ def init(
     except StepFailed as exc:
         out.failure("step_failed", str(exc), fix=exc.fix)
         raise typer.Exit(ExitCode.PROBLEMS) from exc
+    except KeyboardInterrupt as exc:
+        raise Aborted(f"Aborted; the folder {target} was left as it is") from exc
     data = {"path": str(target), "kind": str(kind), "files": created, "github_url": github_url}
     lines = [f"Created a {kind} project at {target}", *(f"  {f}" for f in created)]
     if github_url:
         lines.append(f"GitHub repo: {github_url}")
     out.success(data, human="\n".join(lines))
+
+
+def _refuse_bad_name(ctx: typer.Context, name: str) -> None:
+    """Refuse a name uv can't build a project from, before anything is written.
+
+    ``.`` means the current folder, so its own name must follow the rule.
+    """
+    project_name = Path.cwd().name if name == "." else name
+    if is_valid_name(project_name):
+        return
+    label = f"the current folder's name '{project_name}'" if name == "." else f"'{name}'"
+    raise typer.BadParameter(f"{label} breaks the rule: {NAME_RULE}", ctx=ctx, param_hint="'NAME'")
 
 
 @app.command(hidden=True)

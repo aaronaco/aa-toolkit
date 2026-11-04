@@ -1,8 +1,12 @@
+import _thread
 import contextlib
 import json
 import os
 import shutil
+import signal
 import sys
+import threading
+import time
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -75,6 +79,19 @@ FAILING_TOOL = """\
 import sys
 
 print({message!r}, file=sys.stderr)
+sys.exit(1)
+"""
+
+# Runs until the test presses Ctrl+C, then fails the way a tool stopped by Ctrl+C does.
+CTRL_C_TOOL = """\
+import sys
+import time
+from pathlib import Path
+
+(Path({started!r})).touch()
+deadline = time.monotonic() + 60
+while not Path({released!r}).exists() and time.monotonic() < deadline:
+    time.sleep(0.01)
 sys.exit(1)
 """
 
@@ -160,6 +177,30 @@ class Machine:
         script = self.bin / f"failing_{name}.py"
         script.write_text(FAILING_TOOL.format(message=message))
         self._write_shim(name, [sys.executable, str(script)])
+
+    def add_ctrl_c(self, name: str) -> None:
+        """Put a tool on PATH during whose first run the user presses Ctrl+C.
+
+        Ctrl+C reaches aa as SIGINT, which Python turns into KeyboardInterrupt
+        in the main thread. A watcher thread raises that same signal in this
+        process once the tool is running, then lets the tool exit.
+        """
+        started = self.bin / f"{name}-started"
+        released = self.bin / f"{name}-released"
+        script = self.bin / f"ctrl_c_{name}.py"
+        script.write_text(CTRL_C_TOOL.format(started=str(started), released=str(released)))
+        self._write_shim(name, [sys.executable, str(script)])
+
+        def press_ctrl_c() -> None:
+            deadline = time.monotonic() + 60
+            while not started.exists():
+                if time.monotonic() > deadline:
+                    return
+                time.sleep(0.01)
+            _thread.interrupt_main(signal.SIGINT)
+            released.touch()
+
+        threading.Thread(target=press_ctrl_c, daemon=True).start()
 
     def set_identity(
         self, name: str | None = "Test User", email: str | None = "test@example.com"
