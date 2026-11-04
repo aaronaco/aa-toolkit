@@ -124,7 +124,21 @@ def test_from_a_subfolder_a_fix_first_changes_to_the_project_folder(aa_in, machi
     result = aa_in(project / "src" / "demo", "doctor", "--json", env=machine.full().env)
 
     fix = checks_by_id(json.loads(result.stdout))["python_version"]["fix"]
-    assert fix == f'cd "{project}"; uv python pin 3.15'
+    assert fix == f"cd '{project}'; uv python pin 3.15"
+
+
+def test_a_project_path_with_shell_characters_stays_literal_in_the_cd(
+    aa_in, machine, made_project, tmp_path
+):
+    # PowerShell expands $ and ` inside double quotes; single quotes are literal there and in sh.
+    project = tmp_path / "a$b`c" / "demo"
+    shutil.copytree(made_project, project, ignore=shutil.ignore_patterns(".venv"))
+    (project / ".python-version").unlink()
+
+    result = aa_in(project / "src", "doctor", "--json", env=machine.full().env)
+
+    fix = checks_by_id(json.loads(result.stdout))["python_version"]["fix"]
+    assert fix == f"cd '{project}'; uv python pin 3.15"
 
 
 def test_dependencies_changed_without_relocking_fail_lockfile_with_uv_lock(aa_in, machine, project):

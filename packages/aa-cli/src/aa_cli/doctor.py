@@ -90,7 +90,13 @@ class _Project:
 
     def command(self, command: str) -> str:
         """A fix ``command`` that runs in the root, from the folder aa ran in."""
-        return command if self.here == self.root else f'cd "{self.root}"; {command}'
+        if self.here == self.root:
+            return command
+        # Single quotes keep $ and ` literal in PowerShell and in sh. A path that
+        # holds a single quote can't go in them, so it falls back to double quotes.
+        root = str(self.root)
+        quoted = f'"{root}"' if "'" in root else f"'{root}'"
+        return f"cd {quoted}; {command}"
 
 
 def find_project(start: Path) -> Path | None:
