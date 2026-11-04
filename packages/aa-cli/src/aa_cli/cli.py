@@ -4,6 +4,7 @@ import contextlib
 import io
 import logging
 import os
+import re
 import sys
 from collections.abc import Iterator, Sequence
 from importlib.metadata import version
@@ -15,6 +16,9 @@ from typer.core import TyperGroup
 from aa_cli.output import ExitCode, JsonFlag, Output, VerboseFlag, configure_logging
 
 log = logging.getLogger("aa")
+
+# ANSI escape sequences: CSI (colors, styles) and OSC (hyperlinks).
+_TERMINAL_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
 
 
 class AaGroup(TyperGroup):
@@ -67,7 +71,10 @@ def _help_as_envelope(out: Output) -> Iterator[None]:
     captured = io.StringIO()
     with contextlib.redirect_stdout(captured):
         yield
-    text = "\n".join(line.rstrip() for line in captured.getvalue().splitlines()).strip("\n")
+    # Typer colors help when FORCE_COLOR, PY_COLORS or GITHUB_ACTIONS is set, even
+    # into a buffer; JSON consumers get plain text.
+    plain = _TERMINAL_ESCAPE.sub("", captured.getvalue())
+    text = "\n".join(line.rstrip() for line in plain.splitlines()).strip("\n")
     out.success({"help": text}, human="")
 
 
