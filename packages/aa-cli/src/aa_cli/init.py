@@ -18,9 +18,11 @@ log = logging.getLogger("aa")
 
 PYTHON_VERSION = "3.15"
 COMMIT_MESSAGE = "chore: initialize project with aa"
+BRANCH = "main"
 CI_WORKFLOW = ".github/workflows/ci.yml"
 
 _PLACEHOLDER = re.compile(r"\{\{(\w+)\}\}")
+_GITHUB_URL = re.compile(r"https://\S+")
 
 
 class Kind(StrEnum):
@@ -43,8 +45,11 @@ _KIND_TEMPLATES = {
 class StepFailed(Exception):
     """A step after preflight failed. The message names the step and the tool's error."""
 
-    def __init__(self, step: str, detail: str) -> None:
+    def __init__(self, step: str, detail: str, fix: str | None = None) -> None:
         super().__init__(f"step '{step}' failed: {detail}" if detail else f"step '{step}' failed")
+        self.step = step
+        self.detail = detail
+        self.fix = fix
 
 
 @dataclass(frozen=True)
@@ -109,7 +114,7 @@ def create_project(target: Path, kind: Kind, license_choice: License) -> list[st
     target.mkdir(exist_ok=True)
     # aa makes the repo itself: uv init skips it inside another repo, and the
     # branch must be main whatever the machine's default is.
-    _step("git init", target, "git", "init", "--quiet", "--initial-branch=main")
+    _step("git init", target, "git", "init", "--quiet", f"--initial-branch={BRANCH}")
     _step(
         "uv init",
         target,
@@ -144,11 +149,40 @@ def create_project(target: Path, kind: Kind, license_choice: License) -> list[st
     return sorted(listed.splitlines())
 
 
-def _step(step: str, cwd: Path, tool: str, *args: str) -> str:
+def create_github_repo(target: Path, public: bool) -> str:
+    """Create the GitHub repo for the project in ``target``, push to it and return its URL."""
+    args = [
+        "repo",
+        "create",
+        target.name,
+        "--public" if public else "--private",
+        "--source",
+        ".",
+        "--push",
+    ]
+    kept = f"The project at {target} is kept; run the fix from inside it."
+    try:
+        stdout = _step("create GitHub repo", target, "gh", *args)
+    except StepFailed as exc:
+        # gh adds the new repo as origin before it pushes. Once origin is there,
+        # rerunning gh repo create fails on the taken name; only the push is left.
+        has_origin = run("git", "remote", "get-url", "origin", cwd=target).returncode == 0
+        fix = f"git push --set-upstream origin {BRANCH}" if has_origin else " ".join(["gh", *args])
+        raise StepFailed(exc.step, f"{exc.detail}\n{kept}".lstrip("\n"), fix) from exc
+    # Without a terminal, gh prints the new repo's URL on stdout.
+    url = _GITHUB_URL.search(stdout)
+    if url:
+        return url.group(0)
+    view = ["repo", "view", "--json", "url", "--jq", ".url"]
+    fix = " ".join(["gh", *view])
+    return _step("read GitHub repo URL", target, "gh", *view, fix=fix).strip()
+
+
+def _step(step: str, cwd: Path, tool: str, *args: str, fix: str | None = None) -> str:
     log.debug("Step: %s", step)
     result = run(tool, *args, cwd=cwd)
     if result.returncode != 0:
-        raise StepFailed(step, (result.stderr or result.stdout).strip())
+        raise StepFailed(step, (result.stderr or result.stdout).strip(), fix)
     return result.stdout
 
 
