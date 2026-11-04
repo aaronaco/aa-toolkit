@@ -17,7 +17,7 @@ A repo that `aa init` set up and that carries aa project config. A repo without 
 _Avoid_: repo (when you mean a project), workspace
 
 **Check**:
-One condition `aa doctor` verifies about the machine or a project, which either passes or fails and comes with the command that fixes it.
+One condition `aa doctor` verifies about the machine or a project. It passes or fails, and a failed check comes with the command that fixes it. A result can also be info only, like "not a project", which never fails.
 _Avoid_: test, validation, lint
 
 **Release**:
