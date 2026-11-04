@@ -113,3 +113,31 @@ def test_signed_out_gh_fails_gh_auth_with_the_sign_in_command(aa, machine):
     assert checks["gh"]["status"] == "pass"
     assert checks["gh_auth"]["status"] == "fail"
     assert checks["gh_auth"]["fix"] == "gh auth login"
+
+
+def test_failed_checks_in_json_are_a_checks_failed_envelope_with_every_check(aa, machine):
+    machine.add_gh(signed_in=False)
+
+    result = aa("doctor", "--json", env=machine.env)
+
+    assert result.exit_code == 1
+    envelope = json.loads(result.stdout)
+    assert envelope["ok"] is False
+    assert envelope["error"]["code"] == "checks_failed"
+    ids = [check["id"] for check in envelope["data"]["checks"]]
+    assert ids == [*MACHINE_IDS, "project"]
+    statuses = [check["status"] for check in envelope["data"]["checks"]]
+    assert statuses == ["fail", "fail", "fail", "pass", "fail", "info"]
+
+
+def test_failed_checks_in_human_mode_show_the_fix_under_each_failure(aa, machine):
+    machine.full()
+    machine.add_gh(signed_in=False)
+
+    result = aa("doctor", env=machine.env)
+
+    assert result.exit_code == 1
+    lines = result.stdout.splitlines()
+    failed = next(i for i, line in enumerate(lines) if "[fail]" in line and "gh_auth" in line)
+    assert "gh auth login" in lines[failed + 1]
+    assert "gh_auth" in result.stderr
