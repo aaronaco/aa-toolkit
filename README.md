@@ -34,7 +34,7 @@ aa --version
 
 With `--github`, `aa init` also creates a private GitHub repo with the project's name, pushes the first commit to it and prints its URL. Add `--public` to make the repo public. It then also checks that gh is installed and signed in before creating anything. If creating the repo fails, the local project and its commit stay, and the fix is the `gh repo create` command to rerun from inside the project. If gh created the repo but the push failed, the fix is the `git push` instead.
 
-The name is also the folder and the package name, so it must start with a letter, end with a letter or digit, hold only letters, digits, `-` and `_`, and not be a Python keyword. Any other name is refused as a usage error before anything is created, never renamed. `aa init .` creates the project in the current folder, which must be empty and whose name follows the same rule.
+The name is also the folder and the package name, so it must start with a letter, end with a letter or digit, hold only letters, digits, `-` and `_`, and be neither a Python keyword nor a name Windows reserves (`con`, `prn`, `aux`, `nul`, `com0`-`com9`, `lpt0`-`lpt9`). Any other name is refused as a usage error before anything is created, never renamed. `aa init .` creates the project in the current folder, which must be empty and whose name follows the same rule.
 
 A project is always its own uv workspace. When you run `aa init` inside another uv workspace whose `members` would include the new folder, `aa init` stops before creating anything and tells you which `exclude` entry to add, because uv would otherwise take the project in as a member and break the outer lock.
 

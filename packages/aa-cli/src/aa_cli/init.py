@@ -24,9 +24,12 @@ CI_WORKFLOW = ".github/workflows/ci.yml"
 
 NAME_RULE = (
     "a project name starts with a letter, ends with a letter or digit, holds only"
-    " letters, digits, '-' and '_', and is not a Python keyword"
+    " letters, digits, '-' and '_', and is not a Python keyword or a name Windows reserves"
+    " (con, prn, aux, nul, com0-com9, lpt0-lpt9)"
 )
 _NAME = re.compile(r"[A-Za-z](?:[A-Za-z0-9_-]*[A-Za-z0-9])?")
+# Windows can't create a folder with one of these names, in any case.
+_WINDOWS_RESERVED = re.compile(r"con|prn|aux|nul|com\d|lpt\d", re.IGNORECASE)
 _PLACEHOLDER = re.compile(r"\{\{(\w+)\}\}")
 _GITHUB_URL = re.compile(r"https://\S+")
 
@@ -78,7 +81,11 @@ def is_valid_name(name: str) -> bool:
     """Whether ``name`` follows NAME_RULE, so uv can build a package from it as it is."""
     # uv lowercases the name and turns '-' into '_' to get the import name.
     import_name = name.lower().replace("-", "_")
-    return _NAME.fullmatch(name) is not None and not keyword.iskeyword(import_name)
+    return (
+        _NAME.fullmatch(name) is not None
+        and not keyword.iskeyword(import_name)
+        and _WINDOWS_RESERVED.fullmatch(name) is None
+    )
 
 
 def is_empty_folder_or_missing(target: Path) -> bool:

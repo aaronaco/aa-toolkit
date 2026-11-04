@@ -170,10 +170,10 @@ def test_the_history_is_one_initial_commit_on_main_with_a_clean_tree(cli_project
 
 @pytest.mark.parametrize("kind", ["cli_project", "lib_project"])
 def test_the_created_project_passes_its_own_tests_lint_and_format_check(request, kind):
-    assert_passes_its_own_checks(request.getfixturevalue(kind).project)
+    assert_passes_its_own_tests_and_lint(request.getfixturevalue(kind).project)
 
 
-def assert_passes_its_own_checks(project: Path) -> None:
+def assert_passes_its_own_tests_and_lint(project: Path) -> None:
     """The project's own pytest, ruff check and ruff format --check pass."""
     # As the project's own CI runs them: no Python override, so .python-version decides.
     env = {key: value for key, value in os.environ.items() if key != "UV_PYTHON"}
@@ -213,7 +213,7 @@ def test_an_unknown_license_is_a_usage_error(aa, machine):
     assert json.loads(result.stdout)["error"]["code"] == "usage"
 
 
-NAME_RULE = "starts with a letter"
+RULE_START = "starts with a letter"  # the opening words of the name rule
 
 
 @pytest.mark.parametrize(
@@ -229,8 +229,22 @@ NAME_RULE = "starts with a letter"
         ("demo_", None),
         # A keyword is no import name, so the starter test could never import it.
         ("class", None),
+        # Windows can't make a folder with a reserved device name, whatever the case.
+        ("con", None),
+        ("Com1", None),
     ],
-    ids=["digits", "path", "path-in-existing-folder", "at", "space", "dash-end", "us-end", "kw"],
+    ids=[
+        "digits",
+        "path",
+        "path-in-existing-folder",
+        "at",
+        "space",
+        "dash-end",
+        "us-end",
+        "kw",
+        "reserved",
+        "reserved-mixed-case",
+    ],
 )
 def test_a_name_that_breaks_the_rule_is_a_usage_error_and_creates_nothing(
     aa, machine, tmp_path, name, existing
@@ -244,7 +258,7 @@ def test_a_name_that_breaks_the_rule_is_a_usage_error_and_creates_nothing(
     envelope = json.loads(result.stdout)
     assert envelope["ok"] is False
     assert envelope["error"]["code"] == "usage"
-    assert NAME_RULE in envelope["error"]["message"]
+    assert RULE_START in envelope["error"]["message"]
     assert [path.name for path in tmp_path.rglob("*")] == ([existing] if existing else [])
 
 
@@ -268,18 +282,18 @@ def test_init_dot_in_a_folder_whose_name_breaks_the_rule_is_a_usage_error(aa_in,
     assert result.exit_code == 2
     error = json.loads(result.stdout)["error"]
     assert error["code"] == "usage"
-    assert NAME_RULE in error["message"]
+    assert RULE_START in error["message"]
     assert list(folder.iterdir()) == []
 
 
 @pytest.mark.parametrize("name", ["my-app", "my_app2"])
-def test_a_name_with_dashes_underscores_or_digits_passes_its_own_checks(
+def test_a_name_with_dashes_underscores_or_digits_passes_its_own_tests_and_lint(
     aa_in, machine, tmp_path, name
 ):
     result = aa_in(tmp_path, "init", name, "--json", env=local_machine(machine).env)
 
     assert result.exit_code == 0, result.output
-    assert_passes_its_own_checks(tmp_path / name)
+    assert_passes_its_own_tests_and_lint(tmp_path / name)
 
 
 def test_license_none_creates_no_license_file(aa_in, machine, tmp_path):

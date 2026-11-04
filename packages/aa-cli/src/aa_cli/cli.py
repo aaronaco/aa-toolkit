@@ -80,7 +80,7 @@ class AaGroup(TyperGroup):
                 code = _report_unexpected_error(out, exc)
             else:
                 code = _report_usage_error(out, exc)
-        except (Aborted, typer.Abort) as exc:
+        except Aborted as exc:
             code = _report_aborted(out, exc)
         except Exception as exc:
             code = _report_unexpected_error(out, exc)
@@ -129,8 +129,8 @@ def _report_usage_error(out: Output, exc: typer.TyperException) -> ExitCode:
     return ExitCode.USAGE
 
 
-def _report_aborted(out: Output, exc: Exception) -> ExitCode:
-    out.failure("aborted", str(exc) if isinstance(exc, Aborted) else "Aborted")
+def _report_aborted(out: Output, exc: Aborted) -> ExitCode:
+    out.failure("aborted", str(exc))
     return ExitCode.ABORTED
 
 
@@ -208,7 +208,7 @@ def init(
         raise typer.BadParameter("use only one of them", ctx=ctx, param_hint="'--cli' / '--lib'")
     if public and not github:
         raise typer.BadParameter("only works with '--github'", ctx=ctx, param_hint="'--public'")
-    _check_name(ctx, name)
+    _refuse_bad_name(ctx, name)
     kind = Kind.LIB if lib else Kind.CLI
     target = (Path.cwd() / name).resolve()
     if not is_empty_folder_or_missing(target):
@@ -242,19 +242,16 @@ def init(
     out.success(data, human="\n".join(lines))
 
 
-def _check_name(ctx: typer.Context, name: str) -> None:
+def _refuse_bad_name(ctx: typer.Context, name: str) -> None:
     """Refuse a name uv can't build a project from, before anything is written.
 
     ``.`` means the current folder, so its own name must follow the rule.
     """
-    if name == ".":
-        folder = Path.cwd().name
-        if not is_valid_name(folder):
-            message = f"the current folder's name '{folder}' breaks the rule: {NAME_RULE}"
-            raise typer.BadParameter(message, ctx=ctx, param_hint="'NAME'")
-    elif not is_valid_name(name):
-        message = f"'{name}' breaks the rule: {NAME_RULE}"
-        raise typer.BadParameter(message, ctx=ctx, param_hint="'NAME'")
+    project_name = Path.cwd().name if name == "." else name
+    if is_valid_name(project_name):
+        return
+    label = f"the current folder's name '{project_name}'" if name == "." else f"'{name}'"
+    raise typer.BadParameter(f"{label} breaks the rule: {NAME_RULE}", ctx=ctx, param_hint="'NAME'")
 
 
 @app.command(hidden=True)
