@@ -144,8 +144,12 @@ def _gh_auth() -> Check:
 
 
 def _run(tool: str, *args: str) -> subprocess.CompletedProcess[str]:
-    """Run a tool found on PATH and capture its output."""
+    """Run a tool found on PATH, capture its output and log the command and exit code."""
+    command_line = " ".join([tool, *args])
     executable = shutil.which(tool) or tool
-    return subprocess.run(
+    log.debug("Running %s (%s)", command_line, executable)
+    result = subprocess.run(
         [executable, *args], capture_output=True, text=True, encoding="utf-8", errors="replace"
     )
+    log.debug("%s: exit %d", command_line, result.returncode)
+    return result

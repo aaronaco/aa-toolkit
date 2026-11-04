@@ -204,3 +204,17 @@ def test_an_unreadable_pyproject_is_not_a_project_rather_than_a_crash(aa, machin
 
     assert result.exit_code == 0
     assert checks_by_id(json.loads(result.stdout))["project"]["message"] == "not a project"
+
+
+def test_verbose_logs_each_external_command_and_its_exit_code_to_stderr(aa, machine):
+    machine.full()
+    machine.add_gh(signed_in=False)
+
+    quiet = aa("doctor", "--json", env=machine.env)
+    loud = aa("doctor", "--json", "--verbose", env=machine.env)
+
+    assert "git config --get user.name" not in quiet.stderr
+    assert loud.stdout == quiet.stdout
+    lines = loud.stderr.splitlines()
+    assert any("git config --get user.name" in line and "exit 0" in line for line in lines)
+    assert any("gh auth status" in line and "exit 1" in line for line in lines)

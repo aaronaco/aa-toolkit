@@ -22,7 +22,7 @@ if sys.argv[1:3] == ["auth", "status"]:
     if state["signed_in"]:
         print("Logged in to github.com account test-user")
         sys.exit(0)
-    print("You are not logged into any GitHub hosts. To log in, run: gh auth login", file=sys.stderr)
+    print("You are not logged into any GitHub hosts.", file=sys.stderr)
     sys.exit(1)
 print(f"fake gh: unsupported arguments {sys.argv[1:]}", file=sys.stderr)
 sys.exit(2)
