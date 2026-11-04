@@ -39,6 +39,13 @@ if "--show-scope" in sys.argv[1:]:
 sys.exit(subprocess.run([{real!r}, *sys.argv[1:]]).returncode)
 """
 
+FAILING_TOOL = """\
+import sys
+
+print({message!r}, file=sys.stderr)
+sys.exit(1)
+"""
+
 
 class Machine:
     """A stand-in machine: a PATH that holds only the tools a test puts on it.
@@ -89,6 +96,12 @@ class Machine:
         (self.bin / "gh-state.json").write_text(json.dumps({"signed_in": signed_in}))
         self._write_shim("gh", [sys.executable, str(self.bin / "fake_gh.py")])
 
+    def add_failing(self, name: str, message: str) -> None:
+        """Put a tool on PATH that prints ``message`` to stderr and fails on every call."""
+        script = self.bin / f"failing_{name}.py"
+        script.write_text(FAILING_TOOL.format(message=message))
+        self._write_shim(name, [sys.executable, str(script)])
+
     def set_identity(
         self, name: str | None = "Test User", email: str | None = "test@example.com"
     ) -> None:
@@ -115,21 +128,24 @@ class Machine:
             shim.chmod(0o755)
 
 
-@pytest.fixture
-def machine(tmp_path_factory) -> Machine:
-    """A stand-in machine with nothing on PATH yet. Pass ``machine.env`` to ``aa``."""
-    return Machine(tmp_path_factory.mktemp("machine"))
-
-
 @pytest.fixture(scope="session")
 def new_machine(tmp_path_factory):
-    """Make another stand-in machine, for fixtures that outlive a single test."""
+    """Make a stand-in machine with nothing on PATH yet; usable from fixtures of any scope."""
     return lambda: Machine(tmp_path_factory.mktemp("machine"))
+
+
+@pytest.fixture
+def machine(new_machine) -> Machine:
+    """A stand-in machine with nothing on PATH yet. Pass ``machine.env`` to ``aa``."""
+    return new_machine()
 
 
 @pytest.fixture(scope="session")
 def aa_in():
-    """Run the aa command in process from ``cwd``, for fixtures that outlive a single test."""
+    """Run the aa command in process from ``cwd``; usable from fixtures of any scope.
+
+    AA_JSON is cleared unless ``env`` sets it, so a developer's own setting never leaks in.
+    """
 
     def run(cwd: Path, *args: str, env: dict[str, str | None] | None = None):
         with contextlib.chdir(cwd):
@@ -140,19 +156,15 @@ def aa_in():
 
 @pytest.fixture(autouse=True)
 def _no_ambient_json(monkeypatch):
-    """Keep a developer's own AA_JSON from leaking into tests."""
+    """Keep a developer's own AA_JSON from leaking into tests that run aa as a subprocess."""
     monkeypatch.delenv("AA_JSON", raising=False)
 
 
 @pytest.fixture
-def aa(tmp_path, monkeypatch):
-    """Run the aa command in process, from an empty temporary folder, and return the result."""
+def aa(aa_in, tmp_path, monkeypatch):
+    """Run the aa command in process from the current folder, at first an empty temporary one."""
     monkeypatch.chdir(tmp_path)
-
-    def run(*args: str, env: dict[str, str] | None = None):
-        return CliRunner().invoke(app, list(args), env=env)
-
-    return run
+    return lambda *args, env=None: aa_in(Path.cwd(), *args, env=env)
 
 
 @pytest.fixture

@@ -291,22 +291,43 @@ def test_preflight_does_not_need_gh(cli_project):
     assert cli_project.result.exit_code == 0
 
 
-def test_init_inside_another_uv_workspace_does_not_join_it(aa_in, machine, tmp_path):
+OUTER_PYPROJECT = '[project]\nname = "outer"\nversion = "0.1.0"\nrequires-python = ">=3.14"\n\n'
+
+
+def outer_workspace(folder: Path, env: dict[str, str], workspace: str) -> dict[str, bytes]:
+    """Make ``folder`` a locked uv workspace and a git repo, and return its files."""
+    (folder / "pyproject.toml").write_text(OUTER_PYPROJECT + "[tool.uv.workspace]\n" + workspace)
+    subprocess.run(["uv", "lock"], cwd=folder, check=True, capture_output=True)
+    run_git(folder, env, "init", "-q")
+    return outer_files(folder)
+
+
+def outer_files(folder: Path) -> dict[str, bytes]:
+    return {path.name: path.read_bytes() for path in folder.iterdir() if path.is_file()}
+
+
+def outer_still_locks(folder: Path) -> bool:
+    locked = subprocess.run(["uv", "lock", "--locked"], cwd=folder, capture_output=True)
+    return locked.returncode == 0
+
+
+@pytest.mark.parametrize(
+    "workspace",
+    ['members = ["packages/*"]\n', 'members = ["*"]\nexclude = ["demo"]\n'],
+    ids=["not-a-member", "excluded"],
+)
+def test_init_inside_another_uv_workspace_does_not_join_or_break_it(
+    aa_in, machine, tmp_path, workspace
+):
     machine = local_machine(machine)
     env = git_env(machine)
-    (tmp_path / "pyproject.toml").write_text(
-        '[project]\nname = "outer"\nversion = "0.1.0"\nrequires-python = ">=3.14"\n\n'
-        '[tool.uv.workspace]\nmembers = ["*"]\n'
-    )
-    subprocess.run(["uv", "lock"], cwd=tmp_path, check=True, capture_output=True)
-    run_git(tmp_path, env, "init", "-q")
-    before = {path.name: path.read_bytes() for path in tmp_path.iterdir() if path.is_file()}
+    before = outer_workspace(tmp_path, env, workspace)
 
     created = init(aa_in, tmp_path, machine)
 
     assert created.result.exit_code == 0, created.result.output
-    after = {path.name: path.read_bytes() for path in tmp_path.iterdir() if path.is_file()}
-    assert after == before
+    assert outer_files(tmp_path) == before
+    assert outer_still_locks(tmp_path)
     assert (created.project / "uv.lock").is_file()
     toplevel = Path(created.git("rev-parse", "--show-toplevel").strip())
     assert toplevel.resolve() == created.project.resolve()
@@ -315,15 +336,45 @@ def test_init_inside_another_uv_workspace_does_not_join_it(aa_in, machine, tmp_p
     assert outer_log.returncode != 0  # the outer repo still has no commits
 
 
+@pytest.mark.parametrize(
+    ("workspace", "cwd", "member"),
+    [
+        ('members = ["*"]\n', ".", "demo"),
+        ('members = ["packages/*"]\n', "packages", "packages/demo"),
+    ],
+    ids=["root-glob", "from-a-subfolder"],
+)
+def test_init_where_an_outer_workspace_would_take_the_project_in_stops_first(
+    aa_in, machine, tmp_path, workspace, cwd, member
+):
+    machine = local_machine(machine)
+    before = outer_workspace(tmp_path, git_env(machine), workspace)
+    (tmp_path / cwd).mkdir(exist_ok=True)
+
+    result = aa_in(tmp_path / cwd, "init", "demo", "--json", env=machine.env)
+
+    assert result.exit_code == 1
+    error = json.loads(result.stdout)["error"]
+    assert error["code"] == "target_in_workspace"
+    assert f'exclude = ["{member}"]' in error["fix"]
+    assert not (tmp_path / member).exists()
+    assert outer_files(tmp_path) == before
+    assert outer_still_locks(tmp_path)
+
+
 def test_a_failed_step_is_step_failed_with_the_step_and_its_stderr(aa_in, machine, tmp_path):
-    result = aa_in(tmp_path, "init", "bad!name", "--json", env=local_machine(machine).env)
+    machine.add_real("git")
+    machine.set_identity()
+    machine.add_failing("uv", "fake uv: the index is unreachable")
+
+    result = aa_in(tmp_path, "init", "demo", "--json", env=machine.env)
 
     assert result.exit_code == 1
     error = json.loads(result.stdout)["error"]
     assert error["code"] == "step_failed"
     assert "uv init" in error["message"]
-    assert "not a valid" in error["message"].lower()
-    assert (tmp_path / "bad!name").is_dir()
+    assert "fake uv: the index is unreachable" in error["message"]
+    assert (tmp_path / "demo").is_dir()
 
 
 def test_init_in_human_mode_says_where_the_project_is_and_what_kind(aa, machine, tmp_path):

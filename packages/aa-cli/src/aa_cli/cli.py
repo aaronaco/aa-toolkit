@@ -15,7 +15,14 @@ import typer
 from typer.core import TyperGroup
 
 from aa_cli.doctor import Status, machine_checks, preflight_checks, project_checks, render
-from aa_cli.init import Kind, License, StepFailed, create_project, is_empty_folder_or_missing
+from aa_cli.init import (
+    Kind,
+    License,
+    StepFailed,
+    create_project,
+    is_empty_folder_or_missing,
+    outer_workspace_taking_in,
+)
 from aa_cli.output import ExitCode, JsonFlag, Output, VerboseFlag, configure_logging
 
 log = logging.getLogger("aa")
@@ -165,6 +172,11 @@ def init(
     target = (Path.cwd() / name).resolve()
     if not is_empty_folder_or_missing(target):
         out.failure("target_not_empty", f"{target} already exists and is not an empty folder")
+        raise typer.Exit(ExitCode.PROBLEMS)
+    outer = outer_workspace_taking_in(target)
+    if outer is not None:
+        message = f"{target} would become a member of the uv workspace at {outer.root}"
+        out.failure("target_in_workspace", message, fix=outer.fix)
         raise typer.Exit(ExitCode.PROBLEMS)
     failed = [check for check in preflight_checks() if check.status is Status.FAIL]
     if failed:

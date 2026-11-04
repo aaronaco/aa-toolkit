@@ -32,6 +32,8 @@ aa --version
 
 `aa init <name>` creates a project in the folder `<name>`, which must be new or empty. It runs `uv init` (a CLI by default, a typed library with `--lib`), pins Python 3.15, records the project kind under `[tool.aa]` in pyproject, adds ruff and pytest, and writes a starter test, AGENTS.md, CLAUDE.md, an MIT LICENSE (`--license none` skips it), a README, a .gitignore and a CI workflow for Windows and Linux. It ends with one commit, `chore: initialize project with aa`. It checks uv, git and your git identity first, and creates nothing if one is missing.
 
+A project is always its own uv workspace. When you run `aa init` inside another uv workspace whose `members` would include the new folder, `aa init` stops before creating anything and tells you which `exclude` entry to add, because uv would otherwise take the project in as a member and break the outer lock.
+
 ```bash
 aa init my-app
 ```
@@ -75,6 +77,7 @@ Every `aa` command follows the same rules, so scripts and AI agents can rely on 
 |---|---|---|
 | `checks_failed` | `1` | `aa doctor` found at least one failed check. `data.checks` holds every check. |
 | `target_not_empty` | `1` | `aa init` found the target folder already has something in it. Nothing was changed. |
+| `target_in_workspace` | `1` | `aa init` found an outer uv workspace whose `members` would include the target. The fix names the `exclude` entry to add. Nothing was changed. |
 | `preflight_failed` | `1` | `aa init` found uv, git or the git identity missing. `data.checks` holds the failed checks. Nothing was created. |
 | `step_failed` | `1` | An `aa init` step failed. The message names the step and the tool's error. The folder is left as it is. |
 | `usage` | `2` | Bad or conflicting flags, or a missing argument. |

@@ -9,6 +9,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from aa_cli.git import machine_config
 from aa_cli.process import run
 
 log = logging.getLogger("aa")
@@ -128,7 +129,7 @@ _IDENTITY_PLACEHOLDERS = {"user.name": "Your Name", "user.email": "you@example.c
 
 
 def _git_identity() -> Check:
-    values = {key: machine_git_config(key) for key in _IDENTITY_PLACEHOLDERS}
+    values = {key: machine_config(key) for key in _IDENTITY_PLACEHOLDERS}
     missing = [key for key, value in values.items() if not value]
     if missing:
         fix = "; ".join(
@@ -138,26 +139,6 @@ def _git_identity() -> Check:
         return Check("git_identity", Scope.MACHINE, Status.FAIL, message, fix)
     message = f"{values['user.name']} <{values['user.email']}>"
     return Check("git_identity", Scope.MACHINE, Status.PASS, message)
-
-
-def machine_git_config(key: str) -> str:
-    """The value of ``key`` for the machine, ignoring the current repo's own config.
-
-    A new project only sees machine-wide config, so a name set in the repo
-    ``aa doctor`` happens to run in must not count.
-    """
-    scoped = run("git", "config", "--get-all", "--show-scope", key)
-    if scoped.returncode not in (0, 1):
-        # Git before 2.26 has no --show-scope (exit 1 only means "not set").
-        # Read the value as git would use it, repo config included.
-        return run("git", "config", "--get", key).stdout.strip()
-    listed = scoped.stdout
-    values = [
-        value
-        for scope, _, value in (line.partition("\t") for line in listed.splitlines())
-        if scope not in ("local", "worktree")
-    ]
-    return values[-1].strip() if values else ""
 
 
 def _gh_auth() -> Check:
