@@ -1,0 +1,35 @@
+[project]
+name = "aa-toolkit"
+version = "0.0.0"
+description = "Workspace root of the aa toolkit."
+requires-python = ">=3.14"
+dependencies = ["aa-cli"]
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+aa-cli = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+    "ruff>=0.17.3",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["packages/aa-cli/tests"]
+addopts = ["--import-mode=importlib"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["aa_cli"]
