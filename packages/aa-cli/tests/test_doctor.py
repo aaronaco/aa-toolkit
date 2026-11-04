@@ -141,3 +141,66 @@ def test_failed_checks_in_human_mode_show_the_fix_under_each_failure(aa, machine
     failed = next(i for i, line in enumerate(lines) if "[fail]" in line and "gh_auth" in line)
     assert "gh auth login" in lines[failed + 1]
     assert "gh_auth" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "pyproject",
+    [None, '[project]\nname = "plain"\n', "[tool.ruff]\nline-length = 100\n"],
+    ids=["no-pyproject", "no-tool-section", "other-tool-only"],
+)
+def test_a_folder_without_aa_config_is_not_a_project_and_never_fails(
+    aa, machine, tmp_path, pyproject
+):
+    if pyproject is not None:
+        (tmp_path / "pyproject.toml").write_text(pyproject)
+
+    result = aa("doctor", "--json", env=machine.full().env)
+
+    assert result.exit_code == 0
+    project = [
+        check
+        for check in json.loads(result.stdout)["data"]["checks"]
+        if check["scope"] == "project"
+    ]
+    assert project == [
+        {
+            "id": "project",
+            "scope": "project",
+            "status": "info",
+            "message": "not a project",
+            "fix": None,
+        }
+    ]
+
+
+def test_a_subfolder_of_a_repo_without_aa_config_is_not_a_project(
+    aa, machine, tmp_path, monkeypatch
+):
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "plain"\n')
+    subfolder = tmp_path / "src" / "plain"
+    subfolder.mkdir(parents=True)
+    monkeypatch.chdir(subfolder)
+
+    result = aa("doctor", "--json", env=machine.full().env)
+
+    assert result.exit_code == 0
+    assert checks_by_id(json.loads(result.stdout))["project"]["message"] == "not a project"
+
+
+def test_a_folder_with_aa_config_is_not_reported_as_not_a_project(aa, machine, tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "demo"\n\n[tool.aa]\nkind = "cli"\n'
+    )
+
+    result = aa("doctor", "--json", env=machine.full().env)
+
+    assert "project" not in checks_by_id(json.loads(result.stdout))
+
+
+def test_an_unreadable_pyproject_is_not_a_project_rather_than_a_crash(aa, machine, tmp_path):
+    (tmp_path / "pyproject.toml").write_text("[project\nname = ")
+
+    result = aa("doctor", "--json", env=machine.full().env)
+
+    assert result.exit_code == 0
+    assert checks_by_id(json.loads(result.stdout))["project"]["message"] == "not a project"

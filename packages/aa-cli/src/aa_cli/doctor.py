@@ -66,8 +66,13 @@ def find_project(start: Path) -> Path | None:
     for folder in (start, *start.parents):
         pyproject = folder / "pyproject.toml"
         if pyproject.is_file():
-            config = tomllib.loads(pyproject.read_text(encoding="utf-8"))
-            return folder if "aa" in config.get("tool", {}) else None
+            try:
+                config = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+                log.debug("Cannot read %s: %s", pyproject, exc)
+                return None
+            tool = config.get("tool")
+            return folder if isinstance(tool, dict) and "aa" in tool else None
     return None
 
 
