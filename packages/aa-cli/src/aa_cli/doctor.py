@@ -40,10 +40,18 @@ def machine_checks() -> list[Check]:
     """Every machine check, in order. All of them run, even after a failure."""
     uv = _on_path("uv")
     git = _on_path("git")
-    git_identity = _git_identity()
+    git_identity = _needs(git, "git_identity") or _git_identity()
     gh = _on_path("gh")
-    gh_auth = _gh_auth()
+    gh_auth = _needs(gh, "gh_auth") or _gh_auth()
     return [uv, git, git_identity, gh, gh_auth]
+
+
+def _needs(dependency: Check, check_id: str) -> Check | None:
+    """A failure pointing at ``dependency`` when it failed, else None so the check runs."""
+    if dependency.status is not Status.FAIL:
+        return None
+    message = f"needs the {dependency.id} check, which failed"
+    return Check(check_id, dependency.scope, Status.FAIL, message, dependency.fix)
 
 
 def project_checks(start: Path) -> list[Check]:
@@ -105,10 +113,22 @@ def _on_path(tool: str) -> Check:
     return Check(tool, Scope.MACHINE, Status.PASS, f"found at {path}")
 
 
+_IDENTITY_PLACEHOLDERS = {"user.name": "Your Name", "user.email": "you@example.com"}
+
+
 def _git_identity() -> Check:
-    name = _run("git", "config", "--get", "user.name").stdout.strip()
-    email = _run("git", "config", "--get", "user.email").stdout.strip()
-    return Check("git_identity", Scope.MACHINE, Status.PASS, f"{name} <{email}>")
+    values = {
+        key: _run("git", "config", "--get", key).stdout.strip() for key in _IDENTITY_PLACEHOLDERS
+    }
+    missing = [key for key, value in values.items() if not value]
+    if missing:
+        fix = "; ".join(
+            f'git config --global {key} "{_IDENTITY_PLACEHOLDERS[key]}"' for key in missing
+        )
+        message = f"{' and '.join(missing)} not set"
+        return Check("git_identity", Scope.MACHINE, Status.FAIL, message, fix)
+    message = f"{values['user.name']} <{values['user.email']}>"
+    return Check("git_identity", Scope.MACHINE, Status.PASS, message)
 
 
 def _gh_auth() -> Check:

@@ -2,6 +2,8 @@
 
 import json
 
+import pytest
+
 MACHINE_IDS = ["uv", "git", "git_identity", "gh", "gh_auth"]
 
 
@@ -46,3 +48,40 @@ def test_missing_uv_fails_its_check_and_the_other_checks_still_run(aa, machine):
     assert checks["uv"]["fix"]
     for check_id in ["git", "git_identity", "gh", "gh_auth"]:
         assert checks[check_id]["status"] == "pass", check_id
+
+
+def test_missing_git_fails_git_and_points_git_identity_at_it(aa, machine):
+    machine.add_real("uv")
+    machine.add_gh(signed_in=True)
+
+    result = aa("doctor", "--json", env=machine.env)
+
+    assert result.exit_code == 1
+    checks = checks_by_id(json.loads(result.stdout))
+    assert checks["git"]["status"] == "fail"
+    assert checks["git"]["fix"]
+    assert checks["git_identity"]["status"] == "fail"
+    assert "git check" in checks["git_identity"]["message"]
+    assert checks["git_identity"]["fix"]
+
+
+@pytest.mark.parametrize(
+    ("name", "email", "missing"),
+    [
+        (None, None, ["user.name", "user.email"]),
+        (None, "test@example.com", ["user.name"]),
+        ("Test User", None, ["user.email"]),
+    ],
+    ids=["no-name-or-email", "no-name", "no-email"],
+)
+def test_missing_git_identity_fails_with_the_git_config_commands(aa, machine, name, email, missing):
+    machine.full()
+    machine.set_identity(name=name, email=email)
+
+    result = aa("doctor", "--json", env=machine.env)
+
+    assert result.exit_code == 1
+    check = checks_by_id(json.loads(result.stdout))["git_identity"]
+    assert check["status"] == "fail"
+    for key in missing:
+        assert f"git config --global {key}" in check["fix"]
