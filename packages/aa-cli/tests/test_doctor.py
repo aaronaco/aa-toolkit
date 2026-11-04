@@ -1,6 +1,8 @@
 """``aa doctor``: machine checks, and the "not a project" result outside a project."""
 
 import json
+import os
+import subprocess
 
 import pytest
 
@@ -213,8 +215,27 @@ def test_verbose_logs_each_external_command_and_its_exit_code_to_stderr(aa, mach
     quiet = aa("doctor", "--json", env=machine.env)
     loud = aa("doctor", "--json", "--verbose", env=machine.env)
 
-    assert "git config --get user.name" not in quiet.stderr
+    assert "git config" not in quiet.stderr
     assert loud.stdout == quiet.stdout
     lines = loud.stderr.splitlines()
-    assert any("git config --get user.name" in line and "exit 0" in line for line in lines)
+    assert any("git config" in line and "user.name" in line and "exit 0" in line for line in lines)
     assert any("gh auth status" in line and "exit 1" in line for line in lines)
+
+
+def test_an_identity_set_only_in_the_current_repo_does_not_pass_git_identity(aa, machine, tmp_path):
+    machine.full()
+    machine.set_identity(name=None, email=None)
+    env = {**os.environ, **{k: v for k, v in machine.env.items() if k != "PATH"}}
+    for args in (
+        ["init", "-q"],
+        ["config", "user.name", "Repo User"],
+        ["config", "user.email", "repo@example.com"],
+    ):
+        subprocess.run(["git", *args], cwd=tmp_path, env=env, check=True)
+
+    result = aa("doctor", "--json", env=machine.env)
+
+    assert result.exit_code == 1
+    check = checks_by_id(json.loads(result.stdout))["git_identity"]
+    assert check["status"] == "fail"
+    assert "git config --global user.name" in check["fix"]

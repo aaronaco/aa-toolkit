@@ -122,9 +122,7 @@ _IDENTITY_PLACEHOLDERS = {"user.name": "Your Name", "user.email": "you@example.c
 
 
 def _git_identity() -> Check:
-    values = {
-        key: _run("git", "config", "--get", key).stdout.strip() for key in _IDENTITY_PLACEHOLDERS
-    }
+    values = {key: _machine_git_config(key) for key in _IDENTITY_PLACEHOLDERS}
     missing = [key for key, value in values.items() if not value]
     if missing:
         fix = "; ".join(
@@ -134,6 +132,21 @@ def _git_identity() -> Check:
         return Check("git_identity", Scope.MACHINE, Status.FAIL, message, fix)
     message = f"{values['user.name']} <{values['user.email']}>"
     return Check("git_identity", Scope.MACHINE, Status.PASS, message)
+
+
+def _machine_git_config(key: str) -> str:
+    """The value of ``key`` for the machine, ignoring the current repo's own config.
+
+    A new project only sees machine-wide config, so a name set in the repo
+    ``aa doctor`` happens to run in must not count.
+    """
+    listed = _run("git", "config", "--get-all", "--show-scope", key).stdout
+    values = [
+        value
+        for scope, _, value in (line.partition("\t") for line in listed.splitlines())
+        if scope not in ("local", "worktree")
+    ]
+    return values[-1].strip() if values else ""
 
 
 def _gh_auth() -> Check:
