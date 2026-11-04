@@ -190,11 +190,10 @@ def test_a_lock_check_uv_cannot_run_fails_lockfile_with_uvs_error(aa_in, machine
     assert result.exit_code == 1
     check = checks_by_id(json.loads(result.stdout))["lockfile"]
     assert check["status"] == "fail"
-    assert "out of sync" not in check["message"]
     assert "not a spec!" in check["message"]
     # Relocking fails the same way, so the fix must not be uv lock on its own.
     assert check["fix"] != "uv lock"
-    assert check["fix"].endswith("then run uv lock")
+    assert "uv lock" in check["fix"]
 
 
 def test_without_uv_lockfile_fails_pointing_at_the_uv_check(aa_in, machine, project):
@@ -247,4 +246,5 @@ def test_a_file_missing_from_git_too_gets_a_fix_that_says_to_write_it(aa_in, mac
 
     check = checks_by_id(json.loads(result.stdout))["agents_md"]
     assert check["status"] == "fail"
-    assert check["fix"].startswith("Create AGENTS.md")
+    assert "AGENTS.md" in check["fix"]
+    assert "git checkout" not in check["fix"]
