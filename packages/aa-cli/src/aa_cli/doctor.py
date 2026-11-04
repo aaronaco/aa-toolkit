@@ -40,17 +40,22 @@ class Check:
 
 def machine_checks() -> list[Check]:
     """Every machine check, in order. All of them run, even after a failure."""
-    gh = _on_path("gh")
-    gh_auth = _needs(gh, "gh_auth") or _gh_auth()
-    return [*preflight_checks(), gh, gh_auth]
+    return local_checks() + github_checks()
 
 
-def preflight_checks() -> list[Check]:
-    """The machine checks ``aa init`` needs to pass: uv, git and the git identity."""
+def local_checks() -> list[Check]:
+    """The machine checks a local ``aa init`` needs: uv, git and the git identity."""
     uv = _on_path("uv")
     git = _on_path("git")
     git_identity = _needs(git, "git_identity") or _git_identity()
     return [uv, git, git_identity]
+
+
+def github_checks() -> list[Check]:
+    """The machine checks ``aa init --github`` also needs: gh and the gh sign-in."""
+    gh = _on_path("gh")
+    gh_auth = _needs(gh, "gh_auth") or _gh_auth()
+    return [gh, gh_auth]
 
 
 def _needs(dependency: Check, check_id: str) -> Check | None:

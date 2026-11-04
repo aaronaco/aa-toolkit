@@ -383,3 +383,141 @@ def test_init_in_human_mode_says_where_the_project_is_and_what_kind(aa, machine,
     assert result.exit_code == 0, result.output
     assert str((tmp_path / "demo").resolve()) in result.stdout
     assert "lib" in result.stdout
+
+
+# --github: the GitHub repo, created through the fake gh.
+
+GITHUB_URL = "https://github.com/test-user/demo"
+
+
+def github_machine(machine, **gh_options):
+    """What ``aa init --github`` needs: a local machine plus a fake gh with ``gh_options``."""
+    machine = local_machine(machine)
+    machine.add_gh(**gh_options)
+    return machine
+
+
+def repo_creates(machine) -> list:
+    return [call for call in machine.gh_calls() if call.args[:2] == ["repo", "create"]]
+
+
+@pytest.fixture(scope="module")
+def github_project(tmp_path_factory, new_machine, aa_in):
+    machine = github_machine(new_machine())
+    return init(aa_in, tmp_path_factory.mktemp("init-github"), machine, "--github"), machine
+
+
+def test_init_github_creates_a_private_repo_named_after_the_project_and_pushes(github_project):
+    created, machine = github_project
+
+    assert created.result.exit_code == 0, created.result.output
+    [call] = repo_creates(machine)
+    assert call.args[2] == "demo"
+    assert "--private" in call.args
+    assert "--public" not in call.args
+    assert "--push" in call.args
+    source = call.args[call.args.index("--source") + 1]
+    assert (call.cwd / source).resolve() == created.project.resolve()
+
+
+def test_init_github_json_data_has_the_repo_url(github_project):
+    created, _ = github_project
+
+    assert created.envelope["data"]["github_url"] == GITHUB_URL
+
+
+def test_init_github_runs_after_the_initial_commit(github_project):
+    created, _ = github_project
+
+    assert created.git("log", "--format=%s").splitlines() == [COMMIT_MESSAGE]
+    assert created.git("status", "--porcelain") == ""
+
+
+def test_init_github_public_creates_a_public_repo_and_shows_its_url(aa, machine):
+    machine = github_machine(machine)
+
+    result = aa("init", "demo", "--github", "--public", env=machine.env)
+
+    assert result.exit_code == 0, result.output
+    [call] = repo_creates(machine)
+    assert "--public" in call.args
+    assert "--private" not in call.args
+    assert GITHUB_URL in result.stdout
+
+
+def test_public_without_github_is_a_usage_error_and_creates_nothing(aa, machine, tmp_path):
+    machine = github_machine(machine)
+
+    result = aa("init", "demo", "--public", "--json", env=machine.env)
+
+    assert result.exit_code == 2
+    assert json.loads(result.stdout)["error"]["code"] == "usage"
+    assert list(tmp_path.iterdir()) == []
+    assert repo_creates(machine) == []
+
+
+@pytest.mark.parametrize(
+    ("gh_on_path", "failed"),
+    [(False, ["gh", "gh_auth"]), (True, ["gh_auth"])],
+    ids=["missing", "signed-out"],
+)
+def test_init_github_without_a_signed_in_gh_fails_preflight_before_creating_anything(
+    aa, machine, tmp_path, gh_on_path, failed
+):
+    machine = local_machine(machine)
+    if gh_on_path:
+        machine.add_gh(signed_in=False)
+
+    result = aa("init", "demo", "--github", "--json", env=machine.env)
+
+    assert result.exit_code == 1
+    envelope = json.loads(result.stdout)
+    assert envelope["error"]["code"] == "preflight_failed"
+    assert [check["id"] for check in envelope["data"]["checks"]] == failed
+    assert envelope["error"]["fix"]
+    assert list(tmp_path.iterdir()) == []
+    assert repo_creates(machine) == []
+
+
+def test_a_failed_repo_creation_keeps_the_project_and_gives_the_gh_command_to_rerun(
+    aa_in, machine, tmp_path
+):
+    machine = github_machine(machine, repo_create_fails=True)
+
+    created = init(aa_in, tmp_path, machine, "--github")
+
+    assert created.result.exit_code == 1
+    error = created.envelope["error"]
+    assert error["code"] == "step_failed"
+    assert "Name already exists" in error["message"]
+    assert created.git("log", "--format=%s").splitlines() == [COMMIT_MESSAGE]
+    assert created.git("status", "--porcelain") == ""
+    [call] = repo_creates(machine)
+    assert error["fix"] == " ".join(["gh", *call.args])
+    assert error["fix"].startswith("gh repo create demo ")
+    assert "--source ." in error["fix"]
+    assert str(created.project.resolve()) in error["message"]
+
+
+def test_a_failed_push_after_the_repo_was_created_gives_the_push_to_rerun(aa_in, machine, tmp_path):
+    machine = github_machine(machine, push_fails=True)
+
+    created = init(aa_in, tmp_path, machine, "--github")
+
+    assert created.result.exit_code == 1
+    error = created.envelope["error"]
+    assert error["code"] == "step_failed"
+    assert "exit status 128" in error["message"]
+    assert str(created.project.resolve()) in error["message"]
+    # gh repo create would fail again now that the repo exists; only the push is left.
+    assert error["fix"] == "git push --set-upstream origin main"
+    assert created.git("log", "--format=%s").splitlines() == [COMMIT_MESSAGE]
+
+
+def test_init_github_asks_gh_for_the_url_when_repo_create_prints_none(aa_in, machine, tmp_path):
+    machine = github_machine(machine, prints_url=False)
+
+    created = init(aa_in, tmp_path, machine, "--github")
+
+    assert created.result.exit_code == 0, created.result.output
+    assert created.envelope["data"]["github_url"] == GITHUB_URL
