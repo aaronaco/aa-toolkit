@@ -65,11 +65,8 @@ def _needs(dependency: Check, check_id: str, scope: Scope | None = None) -> Chec
     return Check(check_id, scope or dependency.scope, Status.FAIL, message, dependency.fix)
 
 
-def project_checks(start: Path, uv: Check) -> list[Check]:
-    """The project's checks, in order, or a single "not a project" result outside one.
-
-    ``uv`` is the machine's uv check, which the lockfile check depends on.
-    """
+def project_checks(start: Path) -> list[Check]:
+    """The project's checks, in order, or a single "not a project" result outside one."""
     root = find_project(start)
     if root is None:
         return [Check("project", Scope.PROJECT, Status.INFO, "not a project")]
@@ -77,7 +74,7 @@ def project_checks(start: Path, uv: Check) -> list[Check]:
     return [
         _aa_config(project),
         _python_version(project),
-        _needs(uv, "lockfile", Scope.PROJECT) or _lockfile(project),
+        _needs(_on_path("uv"), "lockfile", Scope.PROJECT) or _lockfile(project),
         _file_exists("agents_md", project, "AGENTS.md", "how to install, test, lint and commit"),
         _file_exists("ci", project, CI_WORKFLOW, "a workflow that runs ruff and pytest"),
     ]
@@ -88,8 +85,8 @@ class _Project:
     root: Path
     here: Path  # the folder aa ran in: the root or a folder under it
 
-    def command(self, command: str) -> str:
-        """A fix ``command`` that runs in the root, from the folder aa ran in."""
+    def cd_to_root(self, command: str) -> str:
+        """``command`` with a ``cd`` to the root first, unless aa already ran there."""
         if self.here == self.root:
             return command
         # Single quotes keep $ and ` literal in PowerShell and in sh. A path that
@@ -197,14 +194,14 @@ def _aa_config(project: _Project) -> Check:
 def _python_version(project: _Project) -> Check:
     pin = project.root / ".python-version"
     if not pin.is_file():
-        fix = project.command(f"uv python pin {PYTHON_VERSION}")
+        fix = project.cd_to_root(f"uv python pin {PYTHON_VERSION}")
         return Check("python_version", Scope.PROJECT, Status.FAIL, ".python-version not found", fix)
     pinned = pin.read_text(encoding="utf-8").strip()
     return Check("python_version", Scope.PROJECT, Status.PASS, f"pins Python {pinned}")
 
 
 def _lockfile(project: _Project) -> Check:
-    fix = project.command("uv lock")
+    fix = project.cd_to_root("uv lock")
     if not (project.root / "uv.lock").is_file():
         return Check("lockfile", Scope.PROJECT, Status.FAIL, "uv.lock not found", fix)
     result = run("uv", "lock", "--check", cwd=project.root)
@@ -222,14 +219,14 @@ def _lockfile(project: _Project) -> Check:
     return Check("lockfile", Scope.PROJECT, Status.FAIL, message, fix)
 
 
-def _file_exists(check_id: str, project: _Project, path: str, content: str) -> Check:
+def _file_exists(check_id: str, project: _Project, path: str, purpose: str) -> Check:
     """Pass when ``path`` exists. The fix restores it from git, or else says to write it."""
     if (project.root / path).is_file():
         return Check(check_id, Scope.PROJECT, Status.PASS, f"{path} found")
     if _in_last_commit(project.root, path):
-        fix = project.command(f"git checkout HEAD -- {path}")
+        fix = project.cd_to_root(f"git checkout HEAD -- {path}")
     else:
-        fix = f"Create {path} in {project.root} with {content}"
+        fix = f"Create {path} in {project.root} with {purpose}"
     return Check(check_id, Scope.PROJECT, Status.FAIL, f"{path} not found", fix)
 
 

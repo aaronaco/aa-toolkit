@@ -140,9 +140,7 @@ def root(
 def doctor(ctx: typer.Context, json_output: JsonFlag = False, verbose: VerboseFlag = False) -> None:
     """Check the machine and the project, and show the fix for each problem."""
     out: Output = ctx.obj
-    machine = machine_checks()
-    uv = next(check for check in machine if check.id == "uv")
-    checks = machine + project_checks(Path.cwd(), uv)
+    checks = machine_checks() + project_checks(Path.cwd())
     data = {"checks": [check.to_json() for check in checks]}
     failed = [check for check in checks if check.status is Status.FAIL]
     if not failed:

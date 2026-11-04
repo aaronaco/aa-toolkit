@@ -17,6 +17,14 @@ def checks_by_id(envelope):
     return {check["id"]: check for check in envelope["data"]["checks"]}
 
 
+def edit_pyproject(project: Path, old: str, new: str) -> None:
+    """Replace ``old`` with ``new`` in the project's pyproject; ``old`` must be there."""
+    pyproject = project / "pyproject.toml"
+    text = pyproject.read_text(encoding="utf-8")
+    assert old in text
+    pyproject.write_text(text.replace(old, new), encoding="utf-8")
+
+
 @pytest.fixture(scope="module")
 def made_project(tmp_path_factory, new_machine, aa_in) -> Path:
     """One project made by ``aa init``, shared by the tests in this module. Never change it."""
@@ -91,9 +99,7 @@ def test_human_output_groups_machine_and_project_checks_under_headings(aa_in, ma
     ids=["missing-kind", "unknown-kind", "kind-not-a-string", "not-a-table"],
 )
 def test_a_missing_or_unknown_kind_fails_aa_config_with_a_fix(aa_in, machine, project, aa_section):
-    pyproject = project / "pyproject.toml"
-    text = pyproject.read_text(encoding="utf-8")
-    pyproject.write_text(text.replace('[tool.aa]\nkind = "cli"\n', aa_section), encoding="utf-8")
+    edit_pyproject(project, '[tool.aa]\nkind = "cli"\n', aa_section)
 
     result = aa_in(project, "doctor", "--json", env=machine.full().env)
 
@@ -154,10 +160,7 @@ def test_a_pyproject_saved_with_a_byte_order_mark_is_still_a_project(aa_in, mach
 
 
 def test_dependencies_changed_without_relocking_fail_lockfile_with_uv_lock(aa_in, machine, project):
-    pyproject = project / "pyproject.toml"
-    text = pyproject.read_text(encoding="utf-8")
-    assert "dependencies = []" in text
-    pyproject.write_text(text.replace("dependencies = []", 'dependencies = ["idna"]'))
+    edit_pyproject(project, "dependencies = []", 'dependencies = ["idna"]')
 
     result = aa_in(project, "doctor", "--json", env=machine.full().env)
 
@@ -181,9 +184,7 @@ def test_a_missing_lockfile_fails_lockfile_with_uv_lock(aa_in, machine, project)
 
 
 def test_a_lock_check_uv_cannot_run_fails_lockfile_with_uvs_error(aa_in, machine, project):
-    pyproject = project / "pyproject.toml"
-    text = pyproject.read_text(encoding="utf-8")
-    pyproject.write_text(text.replace("dependencies = []", 'dependencies = ["not a spec!"]'))
+    edit_pyproject(project, "dependencies = []", 'dependencies = ["not a spec!"]')
 
     result = aa_in(project, "doctor", "--json", env=machine.full().env)
 
