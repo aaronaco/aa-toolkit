@@ -28,6 +28,14 @@ Check it works:
 aa --version
 ```
 
+## Commands
+
+`aa doctor` checks the machine: uv, git and gh on PATH, your git name and email, and the gh sign-in. Every failed check shows the command that fixes it. It exits `1` when any check fails.
+
+```bash
+aa doctor
+```
+
 ## Develop
 
 ```bash
