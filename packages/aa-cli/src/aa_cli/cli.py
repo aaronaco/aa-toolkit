@@ -23,12 +23,14 @@ from aa_cli.doctor import (
     render,
 )
 from aa_cli.init import (
+    NAME_RULE,
     Kind,
     License,
     StepFailed,
     create_github_repo,
     create_project,
     is_empty_folder_or_missing,
+    is_valid_name,
     outer_workspace_taking_in,
 )
 from aa_cli.output import (
@@ -206,6 +208,7 @@ def init(
         raise typer.BadParameter("use only one of them", ctx=ctx, param_hint="'--cli' / '--lib'")
     if public and not github:
         raise typer.BadParameter("only works with '--github'", ctx=ctx, param_hint="'--public'")
+    _check_name(ctx, name)
     kind = Kind.LIB if lib else Kind.CLI
     target = (Path.cwd() / name).resolve()
     if not is_empty_folder_or_missing(target):
@@ -237,6 +240,21 @@ def init(
     if github_url:
         lines.append(f"GitHub repo: {github_url}")
     out.success(data, human="\n".join(lines))
+
+
+def _check_name(ctx: typer.Context, name: str) -> None:
+    """Refuse a name uv can't build a project from, before anything is written.
+
+    ``.`` means the current folder, so its own name must follow the rule.
+    """
+    if name == ".":
+        folder = Path.cwd().name
+        if not is_valid_name(folder):
+            message = f"the current folder's name '{folder}' breaks the rule: {NAME_RULE}"
+            raise typer.BadParameter(message, ctx=ctx, param_hint="'NAME'")
+    elif not is_valid_name(name):
+        message = f"'{name}' breaks the rule: {NAME_RULE}"
+        raise typer.BadParameter(message, ctx=ctx, param_hint="'NAME'")
 
 
 @app.command(hidden=True)
