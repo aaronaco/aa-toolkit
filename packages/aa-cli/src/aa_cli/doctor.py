@@ -193,8 +193,20 @@ def _python_version(project: _Project) -> Check:
 
 
 def _lockfile(project: _Project) -> Check:
-    run("uv", "lock", "--check", cwd=project.root)
-    return Check("lockfile", Scope.PROJECT, Status.PASS, "uv.lock is in sync with pyproject.toml")
+    fix = project.command("uv lock")
+    if not (project.root / "uv.lock").is_file():
+        return Check("lockfile", Scope.PROJECT, Status.FAIL, "uv.lock not found", fix)
+    result = run("uv", "lock", "--check", cwd=project.root)
+    if result.returncode == 0:
+        message = "uv.lock is in sync with pyproject.toml"
+        return Check("lockfile", Scope.PROJECT, Status.PASS, message)
+    # uv exits 1 when the lockfile needs updating, and 2 for any other error.
+    if result.returncode == 1:
+        message = "uv.lock is out of sync with pyproject.toml"
+    else:
+        detail = " ".join((result.stderr or result.stdout).split())
+        message = f"uv lock --check failed: {detail}" if detail else "uv lock --check failed"
+    return Check("lockfile", Scope.PROJECT, Status.FAIL, message, fix)
 
 
 def _file_exists(check_id: str, project: _Project, path: str) -> Check:

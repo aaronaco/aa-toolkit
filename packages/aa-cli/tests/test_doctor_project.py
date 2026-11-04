@@ -107,3 +107,46 @@ def test_from_a_subfolder_a_fix_first_changes_to_the_project_folder(aa_in, machi
 
     fix = checks_by_id(json.loads(result.stdout))["python_version"]["fix"]
     assert fix == f'cd "{project}"; uv python pin 3.15'
+
+
+def test_dependencies_changed_without_relocking_fail_lockfile_with_uv_lock(
+    aa_in, machine, project
+):
+    pyproject = project / "pyproject.toml"
+    text = pyproject.read_text(encoding="utf-8")
+    assert "dependencies = []" in text
+    pyproject.write_text(text.replace("dependencies = []", 'dependencies = ["idna"]'))
+
+    result = aa_in(project, "doctor", "--json", env=machine.full().env)
+
+    assert result.exit_code == 1
+    checks = checks_by_id(json.loads(result.stdout))
+    assert checks["lockfile"]["status"] == "fail"
+    assert checks["lockfile"]["fix"] == "uv lock"
+    assert checks["aa_config"]["status"] == "pass"
+
+
+def test_a_missing_lockfile_fails_lockfile_with_uv_lock(aa_in, machine, project):
+    (project / "uv.lock").unlink()
+
+    result = aa_in(project, "doctor", "--json", env=machine.full().env)
+
+    assert result.exit_code == 1
+    check = checks_by_id(json.loads(result.stdout))["lockfile"]
+    assert check["status"] == "fail"
+    assert "not found" in check["message"]
+    assert check["fix"] == "uv lock"
+
+
+def test_a_lock_check_uv_cannot_run_fails_lockfile_with_uvs_error(aa_in, machine, project):
+    pyproject = project / "pyproject.toml"
+    text = pyproject.read_text(encoding="utf-8")
+    pyproject.write_text(text.replace("dependencies = []", 'dependencies = ["not a spec!"]'))
+
+    result = aa_in(project, "doctor", "--json", env=machine.full().env)
+
+    assert result.exit_code == 1
+    check = checks_by_id(json.loads(result.stdout))["lockfile"]
+    assert check["status"] == "fail"
+    assert "out of sync" not in check["message"]
+    assert "not a spec!" in check["message"]
