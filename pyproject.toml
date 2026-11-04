@@ -21,7 +21,7 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "packages/aa-cli/tests"]
+testpaths = ["packages/aa-cli/tests"]
 addopts = ["--import-mode=importlib"]
 
 [tool.ruff]

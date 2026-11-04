@@ -1,9 +1,11 @@
 """The aa command."""
 
+import contextlib
+import io
 import logging
 import os
 import sys
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from importlib.metadata import version
 from typing import Annotated, Any
 
@@ -31,15 +33,16 @@ class AaGroup(TyperGroup):
         configure_logging(out.verbose)
         log.debug("aa %s on Python %s", version("aa-cli"), sys.version.split()[0])
         try:
-            code = super().main(
-                args,
-                prog_name,
-                complete_var,
-                standalone_mode=False,
-                windows_expand_args=windows_expand_args,
-                obj=out,
-                **extra,
-            )
+            with _help_as_envelope(out):
+                code = super().main(
+                    args,
+                    prog_name,
+                    complete_var,
+                    standalone_mode=False,
+                    windows_expand_args=windows_expand_args,
+                    obj=out,
+                    **extra,
+                )
         except typer.TyperException as exc:
             # Typer gives every usage error (bad flag, missing argument) exit code 2.
             if exc.exit_code != ExitCode.USAGE:
@@ -49,6 +52,23 @@ class AaGroup(TyperGroup):
         except Exception as exc:
             code = _report_unexpected_error(out, exc)
         sys.exit(code if isinstance(code, int) else ExitCode.OK)
+
+
+@contextlib.contextmanager
+def _help_as_envelope(out: Output) -> Iterator[None]:
+    """In JSON mode, wrap the help text in a success envelope.
+
+    If the command fails instead, the captured text is dropped and the error
+    handlers write their own envelope.
+    """
+    if not (out.json and out.help):
+        yield
+        return
+    captured = io.StringIO()
+    with contextlib.redirect_stdout(captured):
+        yield
+    text = "\n".join(line.rstrip() for line in captured.getvalue().splitlines()).strip("\n")
+    out.success({"help": text}, human="")
 
 
 def _report_usage_error(out: Output, exc: typer.TyperException) -> ExitCode:

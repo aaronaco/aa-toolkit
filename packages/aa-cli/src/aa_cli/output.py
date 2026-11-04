@@ -33,6 +33,7 @@ class ExitCode(IntEnum):
 class Output:
     json: bool
     verbose: bool
+    help: bool = False
 
     @classmethod
     def from_args(cls, args: Sequence[str], environ: Mapping[str, str]) -> Output:
@@ -47,6 +48,7 @@ class Output:
         return cls(
             json="--json" in flags or environ.get("AA_JSON") == "1",
             verbose="--verbose" in flags,
+            help="--help" in flags,
         )
 
     def success(self, data: dict[str, Any], human: str) -> None:
