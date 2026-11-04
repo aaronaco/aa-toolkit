@@ -229,6 +229,7 @@ RULE_START = "starts with a letter"  # the opening words of the name rule
         ("demo_", None),
         # A keyword is no import name, so the starter test could never import it.
         ("class", None),
+        ("True", None),
         # Windows can't make a folder with a reserved device name, whatever the case.
         ("con", None),
         ("Com1", None),
@@ -242,6 +243,7 @@ RULE_START = "starts with a letter"  # the opening words of the name rule
         "dash-end",
         "us-end",
         "kw",
+        "kw-capitalized",
         "reserved",
         "reserved-mixed-case",
     ],

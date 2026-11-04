@@ -83,6 +83,8 @@ def is_valid_name(name: str) -> bool:
     import_name = name.lower().replace("-", "_")
     return (
         _NAME.fullmatch(name) is not None
+        # True, False and None are keywords only as typed; the import name catches the rest.
+        and not keyword.iskeyword(name)
         and not keyword.iskeyword(import_name)
         and _WINDOWS_RESERVED.fullmatch(name) is None
     )
