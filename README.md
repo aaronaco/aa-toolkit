@@ -60,6 +60,13 @@ The toolkit needs Python 3.14 or newer. Development uses the Python 3.15 pinned 
 
 Every `aa` command follows the same rules, so scripts and AI agents can rely on them:
 
-- `--json` (before or after the subcommand) or `AA_JSON=1` prints exactly one JSON object on stdout: `{"ok": true, "data": ...}` on success, `{"ok": false, "error": {"code", "message", "fix"}}` on failure.
+- `--json` (before or after the subcommand) or `AA_JSON=1` prints exactly one JSON object on stdout: `{"ok": true, "data": ...}` on success, `{"ok": false, "error": {"code", "message", "fix"}}` on failure. A failure may also carry `data` with the partial result. For example, `aa doctor` returns the full check list there.
 - Logs go to stderr. `--verbose` adds debug logs, including the traceback of an unexpected error.
-- Exit codes: `0` success, `1` problems found or an action failed, `2` usage error (code `usage`), `3` unexpected error (code `unexpected`).
+- Exit codes: `0` success, `1` problems found or an action failed, `2` usage error, `3` unexpected error.
+- Error codes are stable, so scripts can branch on them:
+
+| Code | Exit | Meaning |
+|---|---|---|
+| `checks_failed` | `1` | `aa doctor` found at least one failed check. `data.checks` holds every check. |
+| `usage` | `2` | Bad or conflicting flags, or a missing argument. |
+| `unexpected` | `3` | An uncaught error. Rerun with `--verbose` for the traceback. |
