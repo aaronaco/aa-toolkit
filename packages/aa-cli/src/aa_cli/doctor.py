@@ -203,9 +203,11 @@ def _lockfile(project: _Project) -> Check:
     # uv exits 1 when the lockfile needs updating, and 2 for any other error.
     if result.returncode == 1:
         message = "uv.lock is out of sync with pyproject.toml"
-    else:
-        detail = " ".join((result.stderr or result.stdout).split())
-        message = f"uv lock --check failed: {detail}" if detail else "uv lock --check failed"
+        return Check("lockfile", Scope.PROJECT, Status.FAIL, message, fix)
+    # Relocking would fail the same way until the error itself is fixed.
+    detail = " ".join((result.stderr or result.stdout).split())
+    message = f"uv lock --check failed: {detail}" if detail else "uv lock --check failed"
+    fix = f"Fix the error uv reports, then run {fix}"
     return Check("lockfile", Scope.PROJECT, Status.FAIL, message, fix)
 
 

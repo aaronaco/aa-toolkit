@@ -46,6 +46,21 @@ def test_doctor_in_a_project_made_by_init_passes_every_check(aa_in, machine, pro
     assert all(check["status"] == "pass" for check in checks)
 
 
+def test_doctor_in_a_lib_project_made_by_init_passes_every_check(aa_in, machine, tmp_path):
+    machine.full()
+    made = aa_in(tmp_path, "init", "demo", "--lib", "--json", env=machine.env)
+    assert made.exit_code == 0, made.output
+
+    result = aa_in(tmp_path / "demo", "doctor", "--json", env=machine.env)
+
+    assert result.exit_code == 0, result.output
+    checks = checks_by_id(json.loads(result.stdout))
+    assert [check_id for check_id in checks if checks[check_id]["scope"] == "project"] == (
+        PROJECT_IDS
+    )
+    assert all(check["status"] == "pass" for check in checks.values())
+
+
 def test_doctor_from_a_subfolder_finds_the_project_and_runs_its_checks(aa_in, machine, project):
     result = aa_in(project / "src" / "demo", "doctor", "--json", env=machine.full().env)
 
@@ -151,6 +166,9 @@ def test_a_lock_check_uv_cannot_run_fails_lockfile_with_uvs_error(aa_in, machine
     assert check["status"] == "fail"
     assert "out of sync" not in check["message"]
     assert "not a spec!" in check["message"]
+    # Relocking fails the same way, so the fix must not be uv lock on its own.
+    assert check["fix"] != "uv lock"
+    assert check["fix"].endswith("then run uv lock")
 
 
 def test_without_uv_lockfile_fails_pointing_at_the_uv_check(aa_in, machine, project):
