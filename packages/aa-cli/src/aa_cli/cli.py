@@ -8,11 +8,13 @@ import re
 import sys
 from collections.abc import Iterator, Sequence
 from importlib.metadata import version
+from pathlib import Path
 from typing import Annotated, Any
 
 import typer
 from typer.core import TyperGroup
 
+from aa_cli.doctor import Status, machine_checks, project_checks, render
 from aa_cli.output import ExitCode, JsonFlag, Output, VerboseFlag, configure_logging
 
 log = logging.getLogger("aa")
@@ -124,6 +126,22 @@ def root(
     """A personal developer toolkit."""
     # The global flags are declared so the parser accepts them and --help
     # lists them; AaGroup.main reads them from the raw arguments.
+
+
+@app.command()
+def doctor(ctx: typer.Context, json_output: JsonFlag = False, verbose: VerboseFlag = False) -> None:
+    """Check the machine and the project, and show the fix for each problem."""
+    out: Output = ctx.obj
+    checks = machine_checks() + project_checks(Path.cwd())
+    data = {"checks": [check.to_json() for check in checks]}
+    failed = [check for check in checks if check.status is Status.FAIL]
+    if not failed:
+        out.success(data, human=render(checks))
+        return
+    noun = "check" if len(failed) == 1 else "checks"
+    message = f"{len(failed)} {noun} failed: {', '.join(check.id for check in failed)}"
+    out.failure("checks_failed", message, data=data, human=render(checks))
+    raise typer.Exit(ExitCode.PROBLEMS)
 
 
 @app.command(hidden=True)

@@ -66,7 +66,9 @@ class Output:
         message: str,
         fix: str | None = None,
         data: dict[str, Any] | None = None,
+        human: str | None = None,
     ) -> None:
+        """Report a failure. ``human`` is the partial result to show on stdout first."""
         if self.json:
             envelope: dict[str, Any] = {
                 "ok": False,
@@ -76,6 +78,8 @@ class Output:
                 envelope["data"] = data
             self._write_json(envelope)
         else:
+            if human:
+                typer.echo(human)
             typer.echo(f"Error: {message}", err=True)
             if fix:
                 typer.echo(f"Fix: {fix}", err=True)
