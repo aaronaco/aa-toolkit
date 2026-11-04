@@ -2,13 +2,14 @@
 
 import logging
 import shutil
-import subprocess
 import sys
 import tomllib
 from dataclasses import asdict, dataclass
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
+
+from aa_cli.process import run
 
 log = logging.getLogger("aa")
 
@@ -38,12 +39,17 @@ class Check:
 
 def machine_checks() -> list[Check]:
     """Every machine check, in order. All of them run, even after a failure."""
+    gh = _on_path("gh")
+    gh_auth = _needs(gh, "gh_auth") or _gh_auth()
+    return [*preflight_checks(), gh, gh_auth]
+
+
+def preflight_checks() -> list[Check]:
+    """The machine checks ``aa init`` needs to pass: uv, git and the git identity."""
     uv = _on_path("uv")
     git = _on_path("git")
     git_identity = _needs(git, "git_identity") or _git_identity()
-    gh = _on_path("gh")
-    gh_auth = _needs(gh, "gh_auth") or _gh_auth()
-    return [uv, git, git_identity, gh, gh_auth]
+    return [uv, git, git_identity]
 
 
 def _needs(dependency: Check, check_id: str) -> Check | None:
@@ -122,7 +128,7 @@ _IDENTITY_PLACEHOLDERS = {"user.name": "Your Name", "user.email": "you@example.c
 
 
 def _git_identity() -> Check:
-    values = {key: _machine_git_config(key) for key in _IDENTITY_PLACEHOLDERS}
+    values = {key: machine_git_config(key) for key in _IDENTITY_PLACEHOLDERS}
     missing = [key for key, value in values.items() if not value]
     if missing:
         fix = "; ".join(
@@ -134,17 +140,17 @@ def _git_identity() -> Check:
     return Check("git_identity", Scope.MACHINE, Status.PASS, message)
 
 
-def _machine_git_config(key: str) -> str:
+def machine_git_config(key: str) -> str:
     """The value of ``key`` for the machine, ignoring the current repo's own config.
 
     A new project only sees machine-wide config, so a name set in the repo
     ``aa doctor`` happens to run in must not count.
     """
-    scoped = _run("git", "config", "--get-all", "--show-scope", key)
+    scoped = run("git", "config", "--get-all", "--show-scope", key)
     if scoped.returncode not in (0, 1):
         # Git before 2.26 has no --show-scope (exit 1 only means "not set").
         # Read the value as git would use it, repo config included.
-        return _run("git", "config", "--get", key).stdout.strip()
+        return run("git", "config", "--get", key).stdout.strip()
     listed = scoped.stdout
     values = [
         value
@@ -155,19 +161,7 @@ def _machine_git_config(key: str) -> str:
 
 
 def _gh_auth() -> Check:
-    if _run("gh", "auth", "status", "--hostname", "github.com").returncode != 0:
+    if run("gh", "auth", "status", "--hostname", "github.com").returncode != 0:
         message = "not signed in to github.com"
         return Check("gh_auth", Scope.MACHINE, Status.FAIL, message, "gh auth login")
     return Check("gh_auth", Scope.MACHINE, Status.PASS, "signed in to github.com")
-
-
-def _run(tool: str, *args: str) -> subprocess.CompletedProcess[str]:
-    """Run a tool found on PATH, capture its output and log the command and exit code."""
-    command_line = " ".join([tool, *args])
-    executable = shutil.which(tool) or tool
-    log.debug("Running %s (%s)", command_line, executable)
-    result = subprocess.run(
-        [executable, *args], capture_output=True, text=True, encoding="utf-8", errors="replace"
-    )
-    log.debug("%s: exit %d", command_line, result.returncode)
-    return result

@@ -1,0 +1,32 @@
+# {{name}}
+
+How to work on this project. Source code is in `src/{{package}}` and tests are in `tests`.
+
+## Install
+
+```bash
+uv sync
+```
+
+## Test
+
+```bash
+uv run pytest
+```
+
+## Lint and format
+
+```bash
+uv run ruff check .
+```
+
+```bash
+uv run ruff format .
+```
+
+CI runs `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest` on Windows and Linux. Run them before you commit.
+
+## Commits and branches
+
+- Write commit messages as Conventional Commits, for example `feat: add a config loader` or `fix: handle an empty file`.
+- Work on short branches and merge them into `main`.

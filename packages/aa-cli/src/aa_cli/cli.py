@@ -14,7 +14,8 @@ from typing import Annotated, Any
 import typer
 from typer.core import TyperGroup
 
-from aa_cli.doctor import Status, machine_checks, project_checks, render
+from aa_cli.doctor import Status, machine_checks, preflight_checks, project_checks, render
+from aa_cli.init import Kind, License, StepFailed, create_project, is_empty_folder_or_missing
 from aa_cli.output import ExitCode, JsonFlag, Output, VerboseFlag, configure_logging
 
 log = logging.getLogger("aa")
@@ -142,6 +143,44 @@ def doctor(ctx: typer.Context, json_output: JsonFlag = False, verbose: VerboseFl
     message = f"{len(failed)} {noun} failed: {', '.join(check.id for check in failed)}"
     out.failure("checks_failed", message, data=data, human=render(checks))
     raise typer.Exit(ExitCode.PROBLEMS)
+
+
+@app.command()
+def init(
+    ctx: typer.Context,
+    name: Annotated[str, typer.Argument(help="The project name, also the folder it goes in.")],
+    cli: Annotated[bool, typer.Option("--cli", help="Create a CLI project (the default).")] = False,
+    lib: Annotated[bool, typer.Option("--lib", help="Create a typed library project.")] = False,
+    license_choice: Annotated[
+        License, typer.Option("--license", case_sensitive=False, help="The license to add.")
+    ] = License.MIT,
+    json_output: JsonFlag = False,
+    verbose: VerboseFlag = False,
+) -> None:
+    """Create a project in a new or empty folder."""
+    out: Output = ctx.obj
+    if cli and lib:
+        raise typer.BadParameter("use only one of them", ctx=ctx, param_hint="'--cli' / '--lib'")
+    kind = Kind.LIB if lib else Kind.CLI
+    target = (Path.cwd() / name).resolve()
+    if not is_empty_folder_or_missing(target):
+        out.failure("target_not_empty", f"{target} already exists and is not an empty folder")
+        raise typer.Exit(ExitCode.PROBLEMS)
+    failed = [check for check in preflight_checks() if check.status is Status.FAIL]
+    if failed:
+        message = f"preflight failed: {', '.join(check.id for check in failed)}"
+        fix = "; ".join(dict.fromkeys(check.fix for check in failed if check.fix)) or None
+        data = {"checks": [check.to_json() for check in failed]}
+        out.failure("preflight_failed", message, fix=fix, data=data, human=render(failed))
+        raise typer.Exit(ExitCode.PROBLEMS)
+    try:
+        created = create_project(target, kind, license_choice)
+    except StepFailed as exc:
+        out.failure("step_failed", str(exc))
+        raise typer.Exit(ExitCode.PROBLEMS) from exc
+    data = {"path": str(target), "kind": str(kind), "files": created, "github_url": None}
+    human = "\n".join([f"Created a {kind} project at {target}", *(f"  {f}" for f in created)])
+    out.success(data, human=human)
 
 
 @app.command(hidden=True)

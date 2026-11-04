@@ -30,6 +30,12 @@ aa --version
 
 ## Commands
 
+`aa init <name>` creates a project in the folder `<name>`, which must be new or empty. It runs `uv init` (a CLI by default, a typed library with `--lib`), pins Python 3.15, records the project kind under `[tool.aa]` in pyproject, adds ruff and pytest, and writes a starter test, AGENTS.md, CLAUDE.md, an MIT LICENSE (`--license none` skips it), a README, a .gitignore and a CI workflow for Windows and Linux. It ends with one commit, `chore: initialize project with aa`. It checks uv, git and your git identity first, and creates nothing if one is missing.
+
+```bash
+aa init my-app
+```
+
 `aa doctor` checks the machine: uv, git and gh on PATH, your git name and email, and the gh sign-in. Every failed check shows the command that fixes it. It exits `1` when any check fails.
 
 ```bash
@@ -68,5 +74,8 @@ Every `aa` command follows the same rules, so scripts and AI agents can rely on 
 | Code | Exit | Meaning |
 |---|---|---|
 | `checks_failed` | `1` | `aa doctor` found at least one failed check. `data.checks` holds every check. |
+| `target_not_empty` | `1` | `aa init` found the target folder already has something in it. Nothing was changed. |
+| `preflight_failed` | `1` | `aa init` found uv, git or the git identity missing. `data.checks` holds the failed checks. Nothing was created. |
+| `step_failed` | `1` | An `aa init` step failed. The message names the step and the tool's error. The folder is left as it is. |
 | `usage` | `2` | Bad or conflicting flags, or a missing argument. |
 | `unexpected` | `3` | An uncaught error. Rerun with `--verbose` for the traceback. |

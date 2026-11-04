@@ -1,0 +1,7 @@
+from {{package}} import main
+
+
+def test_main_prints_a_greeting(capsys):
+    main()
+
+    assert capsys.readouterr().out == "Hello from {{name}}!\n"
