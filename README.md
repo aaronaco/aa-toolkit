@@ -34,6 +34,8 @@ aa --version
 
 With `--github`, `aa init` also creates a private GitHub repo with the project's name, pushes the first commit to it and prints its URL. Add `--public` to make the repo public. It then also checks that gh is installed and signed in before creating anything. If creating the repo fails, the local project and its commit stay, and the fix is the `gh repo create` command to rerun from inside the project. If gh created the repo but the push failed, the fix is the `git push` instead.
 
+The name is also the folder and the package name, so it must start with a letter, end with a letter or digit, hold only letters, digits, `-` and `_`, and not be a Python keyword. Any other name is refused as a usage error before anything is created, never renamed. `aa init .` creates the project in the current folder, which must be empty and whose name follows the same rule.
+
 A project is always its own uv workspace. When you run `aa init` inside another uv workspace whose `members` would include the new folder, `aa init` stops before creating anything and tells you which `exclude` entry to add, because uv would otherwise take the project in as a member and break the outer lock.
 
 ```bash
@@ -76,7 +78,7 @@ Every `aa` command follows the same rules, so scripts and AI agents can rely on 
 
 - `--json` (before or after the subcommand) or `AA_JSON=1` prints exactly one JSON object on stdout: `{"ok": true, "data": ...}` on success, `{"ok": false, "error": {"code", "message", "fix"}}` on failure. A failure may also carry `data` with the partial result. For example, `aa doctor` returns the full check list there.
 - Logs go to stderr. `--verbose` adds debug logs, including the traceback of an unexpected error.
-- Exit codes: `0` success, `1` problems found or an action failed, `2` usage error, `3` unexpected error.
+- Exit codes: `0` success, `1` problems found or an action failed, `2` usage error, `3` unexpected error, `130` stopped with Ctrl+C.
 - Error codes are stable, so scripts can branch on them:
 
 | Code | Exit | Meaning |
@@ -86,5 +88,6 @@ Every `aa` command follows the same rules, so scripts and AI agents can rely on 
 | `target_in_workspace` | `1` | `aa init` found an outer uv workspace whose `members` would include the target. The fix names the `exclude` entry to add. Nothing was changed. |
 | `preflight_failed` | `1` | `aa init` found uv, git or the git identity missing, or with `--github`, gh missing or signed out. `data.checks` holds the failed checks. Nothing was created. |
 | `step_failed` | `1` | An `aa init` step failed. The message names the step and the tool's error. The folder is left as it is. When creating the GitHub repo fails, the fix is the `gh repo create` command to rerun from inside the project, or `git push --set-upstream origin main` when the repo was created and only the push failed. |
-| `usage` | `2` | Bad or conflicting flags, or a missing argument. |
+| `usage` | `2` | Bad or conflicting flags, a missing argument, or an `aa init` name that breaks the name rule. Nothing was created. |
+| `aborted` | `130` | Ctrl+C stopped the command. When `aa init` had started writing, the message says the folder was left as it is. |
 | `unexpected` | `3` | An uncaught error. Rerun with `--verbose` for the traceback. |
