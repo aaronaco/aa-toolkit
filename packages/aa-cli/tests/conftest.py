@@ -1,3 +1,4 @@
+import contextlib
 import json
 import os
 import shutil
@@ -118,6 +119,23 @@ class Machine:
 def machine(tmp_path_factory) -> Machine:
     """A stand-in machine with nothing on PATH yet. Pass ``machine.env`` to ``aa``."""
     return Machine(tmp_path_factory.mktemp("machine"))
+
+
+@pytest.fixture(scope="session")
+def new_machine(tmp_path_factory):
+    """Make another stand-in machine, for fixtures that outlive a single test."""
+    return lambda: Machine(tmp_path_factory.mktemp("machine"))
+
+
+@pytest.fixture(scope="session")
+def aa_in():
+    """Run the aa command in process from ``cwd``, for fixtures that outlive a single test."""
+
+    def run(cwd: Path, *args: str, env: dict[str, str | None] | None = None):
+        with contextlib.chdir(cwd):
+            return CliRunner().invoke(app, list(args), env={"AA_JSON": None, **(env or {})})
+
+    return run
 
 
 @pytest.fixture(autouse=True)
