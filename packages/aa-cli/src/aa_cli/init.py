@@ -19,6 +19,7 @@ log = logging.getLogger("aa")
 PYTHON_VERSION = "3.15"
 COMMIT_MESSAGE = "chore: initialize project with aa"
 BRANCH = "main"
+CI_WORKFLOW = ".github/workflows/ci.yml"
 
 _PLACEHOLDER = re.compile(r"\{\{(\w+)\}\}")
 _GITHUB_URL = re.compile(r"https://\S+")
@@ -217,7 +218,7 @@ def _write_files(target: Path, kind: Kind, license_choice: License) -> None:
         "CLAUDE.md": "CLAUDE.md.tmpl",
         "README.md": "README.md.tmpl",
         ".gitignore": "gitignore.tmpl",
-        ".github/workflows/ci.yml": "ci.yml.tmpl",
+        CI_WORKFLOW: "ci.yml.tmpl",
     }
     if license_choice is License.MIT:
         outputs["LICENSE"] = "LICENSE.tmpl"

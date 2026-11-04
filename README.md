@@ -44,7 +44,7 @@ aa init my-app
 aa init my-app --github
 ```
 
-`aa doctor` checks the machine: uv, git and gh on PATH, your git name and email, and the gh sign-in. Every failed check shows the command that fixes it. It exits `1` when any check fails.
+`aa doctor` checks the machine: uv, git and gh on PATH, your git name and email, and the gh sign-in. Run inside a project, from its folder or any subfolder, it also checks the project: a valid `kind` under `[tool.aa]`, `.python-version`, a lockfile in sync with pyproject (`uv lock --check`), AGENTS.md and the CI workflow. A folder whose nearest pyproject has no `[tool.aa]` is not a project, which is reported as info and never fails. Every failed check shows its fix: the command that fixes it, or, when no command can (an unknown `kind`, or a file git has no copy of), what to change. It exits `1` when any check fails.
 
 ```bash
 aa doctor

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from aa_cli.git import machine_config
+from aa_cli.init import CI_WORKFLOW, PYTHON_VERSION, Kind
 from aa_cli.process import run
 
 log = logging.getLogger("aa")
@@ -58,19 +59,46 @@ def github_checks() -> list[Check]:
     return [gh, gh_auth]
 
 
-def _needs(dependency: Check, check_id: str) -> Check | None:
-    """A failure pointing at ``dependency`` when it failed, else None so the check runs."""
+def _needs(dependency: Check, check_id: str, scope: Scope | None = None) -> Check | None:
+    """A failure pointing at ``dependency`` when it failed, else None so the check runs.
+
+    The failure is in ``scope``, by default the dependency's own.
+    """
     if dependency.status is not Status.FAIL:
         return None
     message = f"needs the {dependency.id} check, which failed"
-    return Check(check_id, dependency.scope, Status.FAIL, message, dependency.fix)
+    return Check(check_id, scope or dependency.scope, Status.FAIL, message, dependency.fix)
 
 
 def project_checks(start: Path) -> list[Check]:
-    """The project's checks, or a single "not a project" result outside one."""
-    if find_project(start) is None:
+    """The project's checks, in order, or a single "not a project" result outside one."""
+    root = find_project(start)
+    if root is None:
         return [Check("project", Scope.PROJECT, Status.INFO, "not a project")]
-    return []
+    project = _Project(root, start)
+    return [
+        _aa_config(project),
+        _python_version(project),
+        _needs(_on_path("uv"), "lockfile", Scope.PROJECT) or _lockfile(project),
+        _file_exists("agents_md", project, "AGENTS.md", "how to install, test, lint and commit"),
+        _file_exists("ci", project, CI_WORKFLOW, "a workflow that runs ruff and pytest"),
+    ]
+
+
+@dataclass(frozen=True)
+class _Project:
+    root: Path
+    here: Path  # the folder aa ran in: the root or a folder under it
+
+    def cd_to_root(self, command: str) -> str:
+        """``command`` with a ``cd`` to the root first, unless aa already ran there."""
+        if self.here == self.root:
+            return command
+        # Single quotes keep $ and ` literal in PowerShell and in sh. A path that
+        # holds a single quote can't go in them, so it falls back to double quotes.
+        root = str(self.root)
+        quoted = f'"{root}"' if "'" in root else f"'{root}'"
+        return f"cd {quoted}; {command}"
 
 
 def find_project(start: Path) -> Path | None:
@@ -78,14 +106,18 @@ def find_project(start: Path) -> Path | None:
     for folder in (start, *start.parents):
         pyproject = folder / "pyproject.toml"
         if pyproject.is_file():
-            try:
-                config = tomllib.loads(pyproject.read_text(encoding="utf-8"))
-            except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
-                log.debug("Cannot read %s: %s", pyproject, exc)
-                return None
-            tool = config.get("tool")
+            tool = (_read_pyproject(pyproject) or {}).get("tool")
             return folder if isinstance(tool, dict) and "aa" in tool else None
     return None
+
+
+def _read_pyproject(pyproject: Path) -> dict[str, Any] | None:
+    """The parsed pyproject, or None when it can't be read. A leading BOM is allowed."""
+    try:
+        return tomllib.loads(pyproject.read_text(encoding="utf-8-sig"))
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+        log.debug("Cannot read %s: %s", pyproject, exc)
+        return None
 
 
 _MARKS = {Status.PASS: "[ok]  ", Status.FAIL: "[fail]", Status.INFO: "[info]"}
@@ -144,6 +176,84 @@ def _git_identity() -> Check:
         return Check("git_identity", Scope.MACHINE, Status.FAIL, message, fix)
     message = f"{values['user.name']} <{values['user.email']}>"
     return Check("git_identity", Scope.MACHINE, Status.PASS, message)
+
+
+def _aa_config(project: _Project) -> Check:
+    pyproject = project.root / "pyproject.toml"
+    # find_project already read this file and found [tool.aa] in it.
+    aa = (_read_pyproject(pyproject) or {}).get("tool", {}).get("aa")
+    kind = aa.get("kind") if isinstance(aa, dict) else None
+    if isinstance(kind, str) and kind in Kind:
+        return Check("aa_config", Scope.PROJECT, Status.PASS, f"kind is {kind}")
+    kinds = " or ".join(f'"{choice}"' for choice in Kind)
+    fix = f"Set kind = {kinds} under [tool.aa] in {pyproject}"
+    if not isinstance(aa, dict):
+        message = "[tool.aa] is not a table"
+    elif kind is None:
+        message = "[tool.aa] has no kind"
+    else:
+        message = f"kind {kind!r} is not one of {', '.join(Kind)}"
+    return Check("aa_config", Scope.PROJECT, Status.FAIL, message, fix)
+
+
+def _python_version(project: _Project) -> Check:
+    pin = project.root / ".python-version"
+    if not pin.is_file():
+        fix = project.cd_to_root(f"uv python pin {PYTHON_VERSION}")
+        return Check("python_version", Scope.PROJECT, Status.FAIL, ".python-version not found", fix)
+    pinned = pin.read_text(encoding="utf-8").strip()
+    return Check("python_version", Scope.PROJECT, Status.PASS, f"pins Python {pinned}")
+
+
+def _lockfile(project: _Project) -> Check:
+    fix = project.cd_to_root("uv lock")
+    if not (project.root / "uv.lock").is_file():
+        return Check("lockfile", Scope.PROJECT, Status.FAIL, "uv.lock not found", fix)
+    # A UV_PYTHON in the environment (setup-uv sets one in CI) beats the project's
+    # .python-version, and an interpreter outside requires-python fails the check.
+    # --python beats UV_PYTHON, so ask for the pinned version.
+    pinned = _pinned_python(project.root)
+    python = ["--python", pinned] if pinned else []
+    result = run("uv", "lock", "--check", *python, cwd=project.root)
+    if result.returncode == 0:
+        message = "uv.lock is in sync with pyproject.toml"
+        return Check("lockfile", Scope.PROJECT, Status.PASS, message)
+    # uv exits 1 when the lockfile needs updating, and 2 for any other error.
+    if result.returncode == 1:
+        message = "uv.lock is out of sync with pyproject.toml"
+        return Check("lockfile", Scope.PROJECT, Status.FAIL, message, fix)
+    # Relocking would fail the same way until the error itself is fixed.
+    detail = " ".join((result.stderr or result.stdout).split())
+    message = f"uv lock --check failed: {detail}" if detail else "uv lock --check failed"
+    fix = f"Fix the error uv reports, then run {fix}"
+    return Check("lockfile", Scope.PROJECT, Status.FAIL, message, fix)
+
+
+def _pinned_python(root: Path) -> str | None:
+    """The version in the project's .python-version, or None without one."""
+    try:
+        lines = (root / ".python-version").read_text(encoding="utf-8").splitlines()
+    except OSError, UnicodeDecodeError:
+        return None
+    versions = [line.strip() for line in lines if line.strip() and not line.startswith("#")]
+    return versions[0] if versions else None
+
+
+def _file_exists(check_id: str, project: _Project, path: str, purpose: str) -> Check:
+    """Pass when ``path`` exists. The fix restores it from git, or else says to write it."""
+    if (project.root / path).is_file():
+        return Check(check_id, Scope.PROJECT, Status.PASS, f"{path} found")
+    if _in_last_commit(project.root, path):
+        fix = project.cd_to_root(f"git checkout HEAD -- {path}")
+    else:
+        fix = f"Create {path} in {project.root} with {purpose}"
+    return Check(check_id, Scope.PROJECT, Status.FAIL, f"{path} not found", fix)
+
+
+def _in_last_commit(root: Path, path: str) -> bool:
+    if shutil.which("git") is None:
+        return False
+    return run("git", "cat-file", "-e", f"HEAD:./{path}", cwd=root).returncode == 0
 
 
 def _gh_auth() -> Check:
