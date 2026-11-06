@@ -17,12 +17,17 @@ aa-cli = { workspace = true }
 [dependency-groups]
 dev = [
     "pytest>=9.2.0",
+    "pytest-cov>=7.1.0",
     "ruff>=0.17.3",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["packages/aa-cli/tests"]
 addopts = ["--import-mode=importlib"]
+
+[tool.coverage.run]
+branch = true
+relative_files = true
 
 [tool.ruff]
 line-length = 100
