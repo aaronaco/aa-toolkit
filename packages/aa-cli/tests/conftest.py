@@ -30,12 +30,6 @@ here = Path(__file__).parent
 state = json.loads((here / "gh-state.json").read_text())
 with (here / "gh-calls.jsonl").open("a") as calls:
     calls.write(json.dumps({"args": sys.argv[1:], "cwd": os.getcwd()}) + "\n")
-if sys.argv[1:3] == ["auth", "status"]:
-    if state["signed_in"]:
-        print("Logged in to github.com account test-user")
-        sys.exit(0)
-    print("You are not logged into any GitHub hosts.", file=sys.stderr)
-    sys.exit(1)
 if sys.argv[1:3] == ["repo", "create"]:
     if not state["signed_in"]:
         print("To get started with GitHub CLI, please run:  gh auth login", file=sys.stderr)
@@ -152,8 +146,8 @@ class Machine:
         """Put a fake gh on PATH, signed in or signed out, that records every call.
 
         ``gh repo create <name>`` adds the new repo as the origin remote and
-        prints its URL. ``repo_create_fails`` makes it fail before that,
-        ``push_fails`` makes it fail after adding the remote, and
+        prints its URL. Signed out or with ``repo_create_fails`` it fails before
+        that, ``push_fails`` makes it fail after adding the remote, and
         ``prints_url=False`` makes it print nothing (``gh repo view`` still
         gives the URL).
         """
@@ -211,14 +205,6 @@ class Machine:
         """Set the git identity; pass None to leave the name or email unset."""
         pairs = (("user.name", name), ("user.email", email))
         self._identity = {key: value for key, value in pairs if value is not None}
-
-    def full(self) -> Machine:
-        """uv, git, a git identity and a signed-in gh."""
-        self.add_real("uv")
-        self.add_real("git")
-        self.add_gh(signed_in=True)
-        self.set_identity()
-        return self
 
     def _write_shim(self, name: str, command: list[str]) -> None:
         if os.name == "nt":

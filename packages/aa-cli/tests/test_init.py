@@ -141,6 +141,29 @@ def test_the_license_is_mit_with_the_git_name_and_current_year(cli_project):
     assert f"Copyright (c) {datetime.date.today().year} Ada Lovelace" in license_text
 
 
+def test_the_license_ignores_a_git_name_set_only_in_the_repo_aa_runs_in(aa_in, machine, tmp_path):
+    machine = local_machine(machine)
+    run_git(tmp_path, git_env(machine), "init", "-q")
+    run_git(tmp_path, git_env(machine), "config", "user.name", "Repo User")
+
+    created = init(aa_in, tmp_path, machine)
+
+    assert created.result.exit_code == 0, created.result.output
+    assert "Ada Lovelace" in created.read("LICENSE")
+    assert "Repo User" not in created.read("LICENSE")
+
+
+def test_the_license_has_the_git_name_on_git_older_than_2_26(aa_in, machine, tmp_path):
+    machine.add_real("uv")
+    machine.add_old_git()
+    machine.set_identity(name="Ada Lovelace", email="ada@example.com")
+
+    created = init(aa_in, tmp_path, machine)
+
+    assert created.result.exit_code == 0, created.result.output
+    assert "Ada Lovelace" in created.read("LICENSE")
+
+
 def test_the_readme_has_the_name_and_the_install_test_and_lint_commands(cli_project):
     readme = cli_project.read("README.md")
 
@@ -366,8 +389,41 @@ def test_a_missing_tool_is_reported_as_unexpected_with_no_check_first(aa, machin
     assert "data" not in envelope
 
 
+def test_a_missing_git_identity_fails_the_initial_commit_with_gits_error(aa_in, machine, tmp_path):
+    machine.add_real("uv")
+    machine.add_real("git")
+    # Stops git from making up an identity from the user and host names.
+    no_identity = {
+        **machine.env,
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "user.useConfigOnly",
+        "GIT_CONFIG_VALUE_0": "true",
+    }
+
+    result = aa_in(tmp_path, "init", "demo", "--json", env=no_identity)
+
+    assert result.exit_code == 1
+    error = json.loads(result.stdout)["error"]
+    assert error["code"] == "step_failed"
+    assert "initial commit" in error["message"]
+    assert "user.email" in error["message"]
+
+
 def test_a_local_init_does_not_need_gh(cli_project):
     assert cli_project.result.exit_code == 0
+
+
+@pytest.mark.parametrize("ok", [True, False], ids=["created", "target-not-empty"])
+def test_aa_json_env_gives_init_one_envelope_whose_ok_matches_the_exit_code(
+    aa, machine, tmp_path, ok
+):
+    if not ok:
+        (tmp_path / "demo").write_text("keep me")
+
+    result = aa("init", "demo", env={**local_machine(machine).env, "AA_JSON": "1"})
+
+    assert json.loads(result.stdout)["ok"] is ok
+    assert result.exit_code == (0 if ok else 1)
 
 
 OUTER_PYPROJECT = '[project]\nname = "outer"\nversion = "0.1.0"\nrequires-python = ">=3.14"\n\n'
@@ -577,6 +633,17 @@ def test_a_failed_repo_creation_keeps_the_project_and_gives_the_gh_command_to_re
     assert error["fix"].startswith("gh repo create demo ")
     assert "--source ." in error["fix"]
     assert str(created.project.resolve()) in error["message"]
+
+
+def test_a_failed_step_in_human_mode_shows_the_error_and_the_fix_on_stderr(aa, machine):
+    machine = github_machine(machine, repo_create_fails=True)
+
+    result = aa("init", "demo", "--github", env=machine.env)
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert "Name already exists" in result.stderr
+    assert "Fix: gh repo create demo " in result.stderr
 
 
 def test_a_failed_push_after_the_repo_was_created_gives_the_push_to_rerun(aa_in, machine, tmp_path):

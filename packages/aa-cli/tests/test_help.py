@@ -26,6 +26,15 @@ def test_help_lists_the_global_flags(aa, color_forced):
         assert flag in text
 
 
+def test_help_lists_init_and_not_doctor(aa, color_forced):
+    result = aa("--help")
+
+    assert result.exit_code == 0
+    text = ANSI_ESCAPE.sub("", result.stdout)
+    assert "init" in text
+    assert "doctor" not in text
+
+
 @pytest.mark.parametrize(
     ("args", "env"),
     [
