@@ -553,6 +553,31 @@ def test_init_where_an_outer_workspace_would_take_the_project_in_stops_first(
     assert outer_still_locks(tmp_path)
 
 
+@pytest.mark.parametrize(
+    ("variable", "path"),
+    [("GIT_INDEX_FILE", ".git/index"), ("GIT_DIR", ".git")],
+    ids=["index", "git-dir"],
+)
+def test_git_variables_set_by_a_hook_leave_the_repo_aa_runs_in_alone(
+    aa_in, machine, tmp_path, variable, path
+):
+    machine = local_machine(machine)
+    env = git_env(machine)
+    run_git(tmp_path, env, "init", "-q")
+    (tmp_path / "notes.txt").write_text("keep me")
+    run_git(tmp_path, env, "add", "notes.txt")
+    index = tmp_path / ".git" / "index"
+    before = index.read_bytes()
+
+    result = aa_in(
+        tmp_path, "init", "demo", "--json", env={**machine.env, variable: str(tmp_path / path)}
+    )
+
+    assert result.exit_code == 0, result.output
+    assert index.read_bytes() == before
+    assert_staged_with_no_commits(Created(result, tmp_path / "demo", env))
+
+
 def test_a_failed_step_is_step_failed_with_the_step_and_its_stderr(aa_in, machine, tmp_path):
     machine.add_real("git")
     machine.set_identity()
