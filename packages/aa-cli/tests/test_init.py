@@ -57,6 +57,13 @@ def run_git(cwd: Path, env: dict[str, str], *args: str) -> str:
     return result.stdout
 
 
+def assert_staged_with_no_commits(created: Created) -> None:
+    assert created.git("rev-list", "--all", "--count").strip() == "0"
+    statuses = created.git("status", "--porcelain").splitlines()
+    assert statuses
+    assert all(status.startswith("A  ") for status in statuses), statuses
+
+
 def git_env(machine) -> dict[str, str]:
     """The real PATH with the stand-in machine's throwaway git identity."""
     return {**os.environ, **{k: v for k, v in machine.env.items() if k != "PATH"}}
@@ -191,10 +198,10 @@ def test_the_ci_workflow_runs_lint_and_tests_on_windows_and_linux(cli_project):
     ]
 
 
-def test_the_history_is_one_initial_commit_on_main_with_a_clean_tree(cli_project):
-    assert cli_project.git("log", "--format=%s").splitlines() == [COMMIT_MESSAGE]
+def test_init_stages_every_file_on_main_and_makes_no_commit(cli_project):
+    assert_staged_with_no_commits(cli_project)
+    assert set(cli_project.git("diff", "--cached", "--name-only").splitlines()) == EXPECTED_FILES
     assert cli_project.git("branch", "--show-current").strip() == "main"
-    assert cli_project.git("status", "--porcelain") == ""
 
 
 @pytest.mark.parametrize("kind", ["cli_project", "lib_project"])
@@ -333,7 +340,7 @@ def test_license_none_creates_no_license_file(aa_in, machine, tmp_path):
     assert created.result.exit_code == 0, created.result.output
     assert not (created.project / "LICENSE").exists()
     assert "LICENSE" not in created.envelope["data"]["files"]
-    assert created.git("status", "--porcelain") == ""
+    assert_staged_with_no_commits(created)
 
 
 def test_init_into_an_existing_empty_folder_creates_the_project_there(aa_in, machine, tmp_path):
@@ -389,24 +396,43 @@ def test_a_missing_tool_is_reported_as_unexpected_with_no_check_first(aa, machin
     assert "data" not in envelope
 
 
-def test_a_missing_git_identity_fails_the_initial_commit_with_gits_error(aa_in, machine, tmp_path):
-    machine.add_real("uv")
-    machine.add_real("git")
-    # Stops git from making up an identity from the user and host names.
-    no_identity = {
+def no_identity_env(machine) -> dict[str, str | None]:
+    """The machine's env, with git stopped from making up an identity from the user and host."""
+    return {
         **machine.env,
         "GIT_CONFIG_COUNT": "1",
         "GIT_CONFIG_KEY_0": "user.useConfigOnly",
         "GIT_CONFIG_VALUE_0": "true",
     }
 
-    result = aa_in(tmp_path, "init", "demo", "--license", "none", "--json", env=no_identity)
+
+def test_init_without_github_makes_no_commit_so_it_needs_no_git_identity(aa_in, machine, tmp_path):
+    machine.add_real("uv")
+    machine.add_real("git")
+    env = no_identity_env(machine)
+
+    result = aa_in(tmp_path, "init", "demo", "--license", "none", "--json", env=env)
+
+    assert result.exit_code == 0, result.output
+    assert_staged_with_no_commits(Created(result, tmp_path / "demo", git_env(machine)))
+
+
+def test_init_github_without_a_git_identity_fails_the_initial_commit_with_gits_error(
+    aa_in, machine, tmp_path
+):
+    machine.add_real("uv")
+    machine.add_real("git")
+    machine.add_gh()
+    env = no_identity_env(machine)
+
+    result = aa_in(tmp_path, "init", "demo", "--license", "none", "--github", "--json", env=env)
 
     assert result.exit_code == 1
     error = json.loads(result.stdout)["error"]
     assert error["code"] == "step_failed"
     assert "initial commit" in error["message"]
     assert "user.email" in error["message"]
+    assert repo_creates(machine) == []
 
 
 def test_a_license_without_a_git_name_is_step_failed_and_never_committed(aa_in, machine, tmp_path):
@@ -481,7 +507,7 @@ def test_init_inside_another_uv_workspace_does_not_join_or_break_it(
     assert (created.project / "uv.lock").is_file()
     toplevel = Path(created.git("rev-parse", "--show-toplevel").strip())
     assert toplevel.resolve() == created.project.resolve()
-    assert created.git("log", "--format=%s").splitlines() == [COMMIT_MESSAGE]
+    assert_staged_with_no_commits(created)
     outer_log = subprocess.run(["git", "log"], cwd=tmp_path, env=env, capture_output=True)
     assert outer_log.returncode != 0  # the outer repo still has no commits
 
@@ -576,10 +602,14 @@ def test_init_github_json_data_has_the_repo_url(github_project):
     assert created.envelope["data"]["github_url"] == GITHUB_URL
 
 
-def test_init_github_runs_after_the_initial_commit(github_project):
-    created, _ = github_project
+def test_init_github_pushes_one_initial_commit_on_main_with_a_clean_tree(github_project):
+    created, machine = github_project
 
+    [call] = repo_creates(machine)
+    assert "--push" in call.args
+    assert call.last_commit == COMMIT_MESSAGE
     assert created.git("log", "--format=%s").splitlines() == [COMMIT_MESSAGE]
+    assert created.git("branch", "--show-current").strip() == "main"
     assert created.git("status", "--porcelain") == ""
 
 

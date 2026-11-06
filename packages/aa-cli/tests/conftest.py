@@ -28,8 +28,11 @@ from pathlib import Path
 
 here = Path(__file__).parent
 state = json.loads((here / "gh-state.json").read_text())
+git = shutil.which("git")
+log = subprocess.run([git, "log", "-1", "--format=%s"], capture_output=True, text=True)
 with (here / "gh-calls.jsonl").open("a") as calls:
-    calls.write(json.dumps({"args": sys.argv[1:], "cwd": os.getcwd()}) + "\n")
+    call = {"args": sys.argv[1:], "cwd": os.getcwd(), "last_commit": log.stdout.strip() or None}
+    calls.write(json.dumps(call) + "\n")
 if sys.argv[1:3] == ["repo", "create"]:
     if not state["signed_in"]:
         print("To get started with GitHub CLI, please run:  gh auth login", file=sys.stderr)
@@ -39,7 +42,7 @@ if sys.argv[1:3] == ["repo", "create"]:
         sys.exit(1)
     # Like gh: the repo exists and is the origin remote before the push runs.
     url = f"https://github.com/test-user/{sys.argv[3]}"
-    subprocess.run([shutil.which("git"), "remote", "add", "origin", url + ".git"], check=True)
+    subprocess.run([git, "remote", "add", "origin", url + ".git"], check=True)
     if state["push_fails"]:
         print("failed to run git: exit status 128", file=sys.stderr)
         sys.exit(1)
@@ -56,10 +59,11 @@ sys.exit(2)
 
 @dataclass(frozen=True)
 class GhCall:
-    """One run of the fake gh: its arguments and the folder it ran in."""
+    """One run of the fake gh: its arguments, its folder and the commit there at that moment."""
 
     args: list[str]
     cwd: Path
+    last_commit: str | None
 
 
 OLD_GIT = """\
@@ -167,7 +171,7 @@ class Machine:
         if not log.exists():
             return []
         calls = [json.loads(line) for line in log.read_text().splitlines()]
-        return [GhCall(call["args"], Path(call["cwd"])) for call in calls]
+        return [GhCall(call["args"], Path(call["cwd"]), call["last_commit"]) for call in calls]
 
     def add_failing(self, name: str, message: str) -> None:
         """Put a tool on PATH that prints ``message`` to stderr and fails on every call."""

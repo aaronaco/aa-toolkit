@@ -16,6 +16,12 @@ def test_the_doc_does_not_mention_what_was_removed(package_dir, doc):
     assert REMOVED.findall(text) == []
 
 
+def test_the_readme_says_init_commits_only_with_github(package_dir):
+    readme = (package_dir.parents[1] / "README.md").read_text(encoding="utf-8")
+
+    assert "`aa init` commits only with `--github`" in readme
+
+
 def test_the_glossary_defines_a_project_without_aa_config(package_dir):
     glossary = (package_dir.parents[1] / "GLOSSARY.md").read_text(encoding="utf-8")
 

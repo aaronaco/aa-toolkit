@@ -164,14 +164,14 @@ def create_project(target: Path, kind: Kind, license_choice: License) -> list[st
         "pytest",
     )
     _write_files(target, kind, license_choice)
-    _step("initial commit", target, "git", "add", "--all")
-    _step("initial commit", target, "git", "commit", "--quiet", "--message", COMMIT_MESSAGE)
+    _step("stage files", target, "git", "add", "--all")
     listed = _step("list files", target, "git", "ls-files")
     return sorted(listed.splitlines())
 
 
 def create_github_repo(target: Path, public: bool) -> str:
-    """Create the GitHub repo for the project in ``target``, push to it and return its URL."""
+    """Commit the project in ``target``, create its GitHub repo, push and return the repo's URL."""
+    _step("initial commit", target, "git", "commit", "--quiet", "--message", COMMIT_MESSAGE)
     args = [
         "repo",
         "create",
@@ -242,7 +242,7 @@ def _write_files(target: Path, kind: Kind, license_choice: License) -> None:
         ".github/workflows/ci.yml": "ci.yml.tmpl",
     }
     if license_choice is License.MIT:
-        # Git can make up an author for the commit, but a blank holder would stay in the file.
+        # Nothing else stops a blank holder: git can make up an author for a commit.
         if not values["holder"]:
             detail = "the LICENSE needs a holder, but git's user.name is not set"
             raise StepFailed("write files", detail, 'git config --global user.name "Your Name"')
