@@ -14,20 +14,12 @@ from typing import Annotated, Any
 import typer
 from typer.core import TyperGroup
 
-from aa_cli.doctor import (
-    Status,
-    github_checks,
-    local_checks,
-    machine_checks,
-    project_checks,
-    render,
-)
 from aa_cli.init import (
     NAME_RULE,
     Kind,
     License,
     StepFailed,
-    create_github_repo,
+    commit_and_push_to_github,
     create_project,
     is_empty_folder_or_missing,
     is_valid_name,
@@ -169,22 +161,6 @@ def root(
 
 
 @app.command()
-def doctor(ctx: typer.Context, json_output: JsonFlag = False, verbose: VerboseFlag = False) -> None:
-    """Check the machine and the project, and show the fix for each problem."""
-    out: Output = ctx.obj
-    checks = machine_checks() + project_checks(Path.cwd())
-    data = {"checks": [check.to_json() for check in checks]}
-    failed = [check for check in checks if check.status is Status.FAIL]
-    if not failed:
-        out.success(data, human=render(checks))
-        return
-    noun = "check" if len(failed) == 1 else "checks"
-    message = f"{len(failed)} {noun} failed: {', '.join(check.id for check in failed)}"
-    out.failure("checks_failed", message, data=data, human=render(checks))
-    raise typer.Exit(ExitCode.PROBLEMS)
-
-
-@app.command()
 def init(
     ctx: typer.Context,
     name: Annotated[str, typer.Argument(help="The project name, also the folder it goes in.")],
@@ -219,17 +195,9 @@ def init(
         message = f"{target} would become a member of the uv workspace at {outer.root}"
         out.failure("target_in_workspace", message, fix=outer.fix)
         raise typer.Exit(ExitCode.PROBLEMS)
-    preflight = local_checks() + (github_checks() if github else [])
-    failed = [check for check in preflight if check.status is Status.FAIL]
-    if failed:
-        message = f"preflight failed: {', '.join(check.id for check in failed)}"
-        fix = "; ".join(dict.fromkeys(check.fix for check in failed if check.fix)) or None
-        data = {"checks": [check.to_json() for check in failed]}
-        out.failure("preflight_failed", message, fix=fix, data=data, human=render(failed))
-        raise typer.Exit(ExitCode.PROBLEMS)
     try:
         created = create_project(target, kind, license_choice)
-        github_url = create_github_repo(target, public) if github else None
+        github_url = commit_and_push_to_github(target, public) if github else None
     except StepFailed as exc:
         out.failure("step_failed", str(exc), fix=exc.fix)
         raise typer.Exit(ExitCode.PROBLEMS) from exc

@@ -18,9 +18,10 @@ from aa_cli.process import run
 log = logging.getLogger("aa")
 
 PYTHON_VERSION = "3.15"
-COMMIT_MESSAGE = "chore: initialize project with aa"
+COMMIT_MESSAGE = "chore: initial commit"
 BRANCH = "main"
-CI_WORKFLOW = ".github/workflows/ci.yml"
+PYPROJECT = "pyproject.toml"
+WRITE_FILES_STEP = "write files"
 
 NAME_RULE = (
     "a project name starts with a letter, ends with a letter or digit, holds only"
@@ -52,7 +53,7 @@ _KIND_TEMPLATES = {
 
 
 class StepFailed(Exception):
-    """A step after preflight failed. The message names the step and the tool's error."""
+    """A step of ``aa init`` failed. The message names the step and the tool's error."""
 
     def __init__(self, step: str, detail: str, fix: str | None = None) -> None:
         super().__init__(f"step '{step}' failed: {detail}" if detail else f"step '{step}' failed")
@@ -70,7 +71,7 @@ class OuterWorkspace:
 
     @property
     def fix(self) -> str:
-        pyproject = self.root / "pyproject.toml"
+        pyproject = self.root / PYPROJECT
         return (
             f'Under [tool.uv.workspace] in {pyproject}, add exclude = ["{self.member}"]'
             f' (or add "{self.member}" to the existing exclude list)'
@@ -102,7 +103,7 @@ def outer_workspace_taking_in(target: Path) -> OuterWorkspace | None:
     how it was created, and a project of its own there breaks the outer lock.
     """
     for folder in target.parents:
-        workspace = _uv_workspace(folder / "pyproject.toml")
+        workspace = _uv_workspace(folder / PYPROJECT)
         if workspace is None:
             continue
         member = target.relative_to(folder).as_posix()
@@ -131,8 +132,31 @@ def _matches(member: str, patterns: list[str]) -> bool:
     return any(path.full_match(pattern.removeprefix("./").rstrip("/")) for pattern in patterns)
 
 
+@contextlib.contextmanager
+def _rerun_note(target: Path) -> Iterator[None]:
+    """Add to a failure what stops ``aa init`` from running again: what it left in ``target``."""
+
+    def note() -> str:
+        if is_empty_folder_or_missing(target):
+            return ""
+        return f"The folder {target} was left as it is; delete it before running aa init again."
+
+    try:
+        yield
+    except StepFailed as exc:
+        detail = "\n".join(filter(None, [exc.detail, note()]))
+        raise StepFailed(exc.step, detail, exc.fix) from exc
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(" ".join(filter(None, [f"{exc}.", note()]))) from exc
+
+
 def create_project(target: Path, kind: Kind, license_choice: License) -> list[str]:
     """Create the project in ``target`` (missing or empty) and return the files it holds."""
+    with _rerun_note(target):
+        return _build_project(target, kind, license_choice)
+
+
+def _build_project(target: Path, kind: Kind, license_choice: License) -> list[str]:
     target.mkdir(exist_ok=True)
     # aa makes the repo itself: uv init skips it inside another repo, and the
     # branch must be main whatever the machine's default is.
@@ -150,7 +174,7 @@ def create_project(target: Path, kind: Kind, license_choice: License) -> list[st
         "--vcs",
         "none",
     )
-    _add_aa_config(target, kind)
+    _add_uv_workspace(target)
     # --python wins over a UV_PYTHON set in the environment, which would
     # otherwise override the project's pin.
     _step(
@@ -165,14 +189,17 @@ def create_project(target: Path, kind: Kind, license_choice: License) -> list[st
         "pytest",
     )
     _write_files(target, kind, license_choice)
-    _step("initial commit", target, "git", "add", "--all")
-    _step("initial commit", target, "git", "commit", "--quiet", "--message", COMMIT_MESSAGE)
+    # The folder holds only what aa just made, so global ignore rules have nothing to protect.
+    # One like *.lock would drop a file the project's CI needs, and git add wouldn't say so.
+    _step("stage files", target, "git", "-c", "core.excludesFile=", "add", "--all")
     listed = _step("list files", target, "git", "ls-files")
     return sorted(listed.splitlines())
 
 
-def create_github_repo(target: Path, public: bool) -> str:
-    """Create the GitHub repo for the project in ``target``, push to it and return its URL."""
+def commit_and_push_to_github(target: Path, public: bool) -> str:
+    """Commit the project in ``target``, create its GitHub repo, push and return the repo's URL."""
+    with _rerun_note(target):
+        _step("initial commit", target, "git", "commit", "--quiet", "--message", COMMIT_MESSAGE)
     args = [
         "repo",
         "create",
@@ -185,6 +212,8 @@ def create_github_repo(target: Path, public: bool) -> str:
     kept = f"The project at {target} is kept; run the fix from inside it."
     try:
         stdout = _step("create GitHub repo", target, "gh", *args)
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(f"{exc}. The project at {target} is kept.") from exc
     except StepFailed as exc:
         # gh adds the new repo as origin before it pushes. Once origin is there,
         # rerunning gh repo create fails on the taken name; only the push is left.
@@ -217,11 +246,11 @@ def _file_step(step: str) -> Iterator[None]:
         raise StepFailed(step, str(exc)) from exc
 
 
-def _add_aa_config(target: Path, kind: Kind) -> None:
-    pyproject = target / "pyproject.toml"
-    with _file_step("add aa config"):
+def _add_uv_workspace(target: Path) -> None:
+    pyproject = target / PYPROJECT
+    with _file_step("add uv workspace"):
         text = pyproject.read_text(encoding="utf-8")
-        _write(pyproject, text.rstrip("\n") + "\n\n" + _render("pyproject.toml.tmpl", kind=kind))
+        _write(pyproject, text.rstrip("\n") + "\n\n" + _render("pyproject.toml.tmpl"))
 
 
 def _write_files(target: Path, kind: Kind, license_choice: License) -> None:
@@ -240,11 +269,15 @@ def _write_files(target: Path, kind: Kind, license_choice: License) -> None:
         "CLAUDE.md": "CLAUDE.md.tmpl",
         "README.md": "README.md.tmpl",
         ".gitignore": "gitignore.tmpl",
-        CI_WORKFLOW: "ci.yml.tmpl",
+        ".github/workflows/ci.yml": "ci.yml.tmpl",
     }
     if license_choice is License.MIT:
+        # Nothing else stops a blank holder: git can make up an author for a commit.
+        if not values["holder"]:
+            detail = "the LICENSE needs a holder, but git's user.name is not set"
+            raise StepFailed(WRITE_FILES_STEP, detail, 'git config --global user.name "Your Name"')
         outputs["LICENSE"] = "LICENSE.tmpl"
-    with _file_step("write files"):
+    with _file_step(WRITE_FILES_STEP):
         for path, template in outputs.items():
             _write(target / path, _render(template, **values))
 
@@ -253,7 +286,7 @@ def _package_name(target: Path) -> str:
     """The import name uv init chose: the one package folder under ``src``."""
     packages = [path.name for path in (target / "src").iterdir() if path.is_dir()]
     if len(packages) != 1:
-        raise StepFailed("write files", f"expected one package under src, found {packages}")
+        raise StepFailed(WRITE_FILES_STEP, f"expected one package under src, found {packages}")
     return packages[0]
 
 

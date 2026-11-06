@@ -12,6 +12,23 @@ def test_unknown_flag_in_human_mode_prints_usage_to_stderr_and_exits_2(aa):
     assert "Usage:" in result.stderr
 
 
+def test_doctor_is_an_unknown_command(aa):
+    result = aa("doctor")
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "No such command 'doctor'" in result.stderr
+
+
+def test_doctor_in_json_mode_is_a_usage_envelope(aa):
+    result = aa("doctor", "--json")
+
+    assert result.exit_code == 2
+    error = json.loads(result.stdout)["error"]
+    assert error["code"] == "usage"
+    assert "doctor" in error["message"]
+
+
 @pytest.mark.parametrize(
     ("args", "env"),
     [

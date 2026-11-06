@@ -68,26 +68,10 @@ class Output:
         else:
             typer.echo(human)
 
-    def failure(
-        self,
-        code: str,
-        message: str,
-        fix: str | None = None,
-        data: dict[str, Any] | None = None,
-        human: str | None = None,
-    ) -> None:
-        """Report a failure. ``human`` is the partial result to show on stdout first."""
+    def failure(self, code: str, message: str, fix: str | None = None) -> None:
         if self.json:
-            envelope: dict[str, Any] = {
-                "ok": False,
-                "error": {"code": code, "message": message, "fix": fix},
-            }
-            if data is not None:
-                envelope["data"] = data
-            self._write_json(envelope)
+            self._write_json({"ok": False, "error": {"code": code, "message": message, "fix": fix}})
         else:
-            if human:
-                typer.echo(human)
             typer.echo(f"Error: {message}", err=True)
             if fix:
                 typer.echo(f"Fix: {fix}", err=True)
@@ -99,8 +83,7 @@ class Output:
 def configure_logging(verbose: bool) -> None:
     """Send aa's logs to stderr: debug with --verbose, warnings otherwise."""
     logger = logging.getLogger("aa")
-    for handler in list(logger.handlers):
-        logger.removeHandler(handler)
+    logger.handlers.clear()
     handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
     logger.addHandler(handler)
