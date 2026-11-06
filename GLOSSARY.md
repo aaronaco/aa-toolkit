@@ -13,12 +13,8 @@ An aa package that can be installed and used on its own, without the CLI or any 
 _Avoid_: engine, module, core
 
 **Project**:
-A repo that `aa init` set up and that carries aa project config. A repo without that config is just a repo.
+A repo that `aa init` set up.
 _Avoid_: repo (when you mean a project), workspace
-
-**Check**:
-One condition `aa doctor` verifies about the machine or a project. It passes or fails, and a failed check comes with the command that fixes it. A result can also be info only, like "not a project", which never fails.
-_Avoid_: test, validation, lint
 
 **Release**:
 Choosing a project's next version, recording its changelog and tagging it.
