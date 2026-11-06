@@ -37,6 +37,9 @@ if sys.argv[1:3] == ["auth", "status"]:
     print("You are not logged into any GitHub hosts.", file=sys.stderr)
     sys.exit(1)
 if sys.argv[1:3] == ["repo", "create"]:
+    if not state["signed_in"]:
+        print("To get started with GitHub CLI, please run:  gh auth login", file=sys.stderr)
+        sys.exit(4)
     if state["repo_create_fails"]:
         print("GraphQL: Name already exists on this account (createRepository)", file=sys.stderr)
         sys.exit(1)

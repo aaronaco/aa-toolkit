@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-COMMIT_MESSAGE = "chore: initialize project with aa"
+COMMIT_MESSAGE = "chore: initial commit"
 EXPECTED_FILES = {
     ".github/workflows/ci.yml",
     ".gitignore",
@@ -91,8 +91,15 @@ def test_init_without_a_kind_creates_a_cli_project(cli_project):
     assert cli_project.result.exit_code == 0, cli_project.result.output
     assert cli_project.envelope["ok"] is True
     assert cli_project.envelope["data"]["kind"] == "cli"
-    assert cli_project.pyproject["tool"]["aa"] == {"kind": "cli"}
     assert cli_project.pyproject["project"]["scripts"] == {"demo": "demo:main"}
+
+
+@pytest.mark.parametrize("kind", ["cli_project", "lib_project"])
+def test_the_created_project_has_no_aa_config_and_is_its_own_uv_workspace(request, kind):
+    tool = request.getfixturevalue(kind).pyproject["tool"]
+
+    assert "aa" not in tool
+    assert "workspace" in tool["uv"]
 
 
 def test_init_json_data_has_the_path_kind_files_and_no_github_url(cli_project):
@@ -108,7 +115,6 @@ def test_init_json_data_has_the_path_kind_files_and_no_github_url(cli_project):
 def test_init_lib_creates_a_typed_library_without_a_command(lib_project):
     assert lib_project.result.exit_code == 0, lib_project.result.output
     assert lib_project.envelope["data"]["kind"] == "lib"
-    assert lib_project.pyproject["tool"]["aa"] == {"kind": "lib"}
     assert "scripts" not in lib_project.pyproject["project"]
     assert (lib_project.project / "src" / "demo" / "py.typed").is_file()
     assert "src/demo/py.typed" in lib_project.envelope["data"]["files"]
@@ -344,39 +350,23 @@ def test_a_file_named_like_the_project_is_target_not_empty(aa, machine, tmp_path
     assert (tmp_path / "demo").read_text() == "keep me"
 
 
-@pytest.mark.parametrize(
-    ("missing", "failed"),
-    [
-        ("uv", ["uv"]),
-        ("git", ["git", "git_identity"]),
-        ("identity", ["git_identity"]),
-    ],
-)
-def test_a_missing_tool_or_identity_fails_preflight_before_creating_anything(
-    aa, machine, tmp_path, missing, failed
-):
+@pytest.mark.parametrize("missing", ["uv", "git"])
+def test_a_missing_tool_is_reported_as_unexpected_with_no_check_first(aa, machine, missing):
     if missing != "uv":
         machine.add_real("uv")
     if missing != "git":
         machine.add_real("git")
-    if missing != "identity":
-        machine.set_identity()
+    machine.set_identity()
 
     result = aa("init", "demo", "--json", env=machine.env)
 
-    assert result.exit_code == 1
+    assert result.exit_code == 3
     envelope = json.loads(result.stdout)
-    assert envelope["error"]["code"] == "preflight_failed"
-    assert envelope["error"]["fix"]
-    assert [check["id"] for check in envelope["data"]["checks"]] == failed
-    doctor = json.loads(aa("doctor", "--json", env=machine.env).stdout)["data"]["checks"]
-    doctor = {check["id"]: check for check in doctor}
-    for check in envelope["data"]["checks"]:
-        assert check == doctor[check["id"]]
-    assert list(tmp_path.iterdir()) == []
+    assert envelope["error"]["code"] == "unexpected"
+    assert "data" not in envelope
 
 
-def test_preflight_does_not_need_gh(cli_project):
+def test_a_local_init_does_not_need_gh(cli_project):
     assert cli_project.result.exit_code == 0
 
 
@@ -545,27 +535,28 @@ def test_public_without_github_is_a_usage_error_and_creates_nothing(aa, machine,
     assert repo_creates(machine) == []
 
 
-@pytest.mark.parametrize(
-    ("gh_on_path", "failed"),
-    [(False, ["gh", "gh_auth"]), (True, ["gh_auth"])],
-    ids=["missing", "signed-out"],
-)
-def test_init_github_without_a_signed_in_gh_fails_preflight_before_creating_anything(
-    aa, machine, tmp_path, gh_on_path, failed
+def test_init_github_with_gh_signed_out_keeps_the_project_and_gives_the_gh_command_to_rerun(
+    aa_in, machine, tmp_path
 ):
-    machine = local_machine(machine)
-    if gh_on_path:
-        machine.add_gh(signed_in=False)
+    machine = github_machine(machine, signed_in=False)
 
-    result = aa("init", "demo", "--github", "--json", env=machine.env)
+    created = init(aa_in, tmp_path, machine, "--github")
 
-    assert result.exit_code == 1
-    envelope = json.loads(result.stdout)
-    assert envelope["error"]["code"] == "preflight_failed"
-    assert [check["id"] for check in envelope["data"]["checks"]] == failed
-    assert envelope["error"]["fix"]
-    assert list(tmp_path.iterdir()) == []
-    assert repo_creates(machine) == []
+    assert created.result.exit_code == 1
+    error = created.envelope["error"]
+    assert error["code"] == "step_failed"
+    assert "gh auth login" in error["message"]
+    assert error["fix"].startswith("gh repo create demo ")
+    assert created.git("log", "--format=%s").splitlines() == [COMMIT_MESSAGE]
+    assert created.git("status", "--porcelain") == ""
+
+
+def test_init_github_without_gh_keeps_the_project_and_reports_unexpected(aa_in, machine, tmp_path):
+    created = init(aa_in, tmp_path, local_machine(machine), "--github")
+
+    assert created.result.exit_code == 3
+    assert created.envelope["error"]["code"] == "unexpected"
+    assert created.git("log", "--format=%s").splitlines() == [COMMIT_MESSAGE]
 
 
 def test_a_failed_repo_creation_keeps_the_project_and_gives_the_gh_command_to_rerun(

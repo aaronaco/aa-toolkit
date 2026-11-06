@@ -14,14 +14,7 @@ from typing import Annotated, Any
 import typer
 from typer.core import TyperGroup
 
-from aa_cli.doctor import (
-    Status,
-    github_checks,
-    local_checks,
-    machine_checks,
-    project_checks,
-    render,
-)
+from aa_cli.doctor import Status, machine_checks, project_checks, render
 from aa_cli.init import (
     NAME_RULE,
     Kind,
@@ -218,14 +211,6 @@ def init(
     if outer is not None:
         message = f"{target} would become a member of the uv workspace at {outer.root}"
         out.failure("target_in_workspace", message, fix=outer.fix)
-        raise typer.Exit(ExitCode.PROBLEMS)
-    preflight = local_checks() + (github_checks() if github else [])
-    failed = [check for check in preflight if check.status is Status.FAIL]
-    if failed:
-        message = f"preflight failed: {', '.join(check.id for check in failed)}"
-        fix = "; ".join(dict.fromkeys(check.fix for check in failed if check.fix)) or None
-        data = {"checks": [check.to_json() for check in failed]}
-        out.failure("preflight_failed", message, fix=fix, data=data, human=render(failed))
         raise typer.Exit(ExitCode.PROBLEMS)
     try:
         created = create_project(target, kind, license_choice)

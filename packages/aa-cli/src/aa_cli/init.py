@@ -18,7 +18,7 @@ from aa_cli.process import run
 log = logging.getLogger("aa")
 
 PYTHON_VERSION = "3.15"
-COMMIT_MESSAGE = "chore: initialize project with aa"
+COMMIT_MESSAGE = "chore: initial commit"
 BRANCH = "main"
 CI_WORKFLOW = ".github/workflows/ci.yml"
 
@@ -52,7 +52,7 @@ _KIND_TEMPLATES = {
 
 
 class StepFailed(Exception):
-    """A step after preflight failed. The message names the step and the tool's error."""
+    """A step of ``aa init`` failed. The message names the step and the tool's error."""
 
     def __init__(self, step: str, detail: str, fix: str | None = None) -> None:
         super().__init__(f"step '{step}' failed: {detail}" if detail else f"step '{step}' failed")
@@ -150,7 +150,7 @@ def create_project(target: Path, kind: Kind, license_choice: License) -> list[st
         "--vcs",
         "none",
     )
-    _add_aa_config(target, kind)
+    _add_uv_workspace(target)
     # --python wins over a UV_PYTHON set in the environment, which would
     # otherwise override the project's pin.
     _step(
@@ -217,11 +217,11 @@ def _file_step(step: str) -> Iterator[None]:
         raise StepFailed(step, str(exc)) from exc
 
 
-def _add_aa_config(target: Path, kind: Kind) -> None:
+def _add_uv_workspace(target: Path) -> None:
     pyproject = target / "pyproject.toml"
-    with _file_step("add aa config"):
+    with _file_step("add uv workspace"):
         text = pyproject.read_text(encoding="utf-8")
-        _write(pyproject, text.rstrip("\n") + "\n\n" + _render("pyproject.toml.tmpl", kind=kind))
+        _write(pyproject, text.rstrip("\n") + "\n\n" + _render("pyproject.toml.tmpl"))
 
 
 def _write_files(target: Path, kind: Kind, license_choice: License) -> None:
