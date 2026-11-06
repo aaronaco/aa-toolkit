@@ -68,26 +68,10 @@ class Output:
         else:
             typer.echo(human)
 
-    def failure(
-        self,
-        code: str,
-        message: str,
-        fix: str | None = None,
-        data: dict[str, Any] | None = None,
-        human: str | None = None,
-    ) -> None:
-        """Report a failure. ``human`` is the partial result to show on stdout first."""
+    def failure(self, code: str, message: str, fix: str | None = None) -> None:
         if self.json:
-            envelope: dict[str, Any] = {
-                "ok": False,
-                "error": {"code": code, "message": message, "fix": fix},
-            }
-            if data is not None:
-                envelope["data"] = data
-            self._write_json(envelope)
+            self._write_json({"ok": False, "error": {"code": code, "message": message, "fix": fix}})
         else:
-            if human:
-                typer.echo(human)
             typer.echo(f"Error: {message}", err=True)
             if fix:
                 typer.echo(f"Fix: {fix}", err=True)

@@ -32,7 +32,7 @@ aa --version
 
 `aa init <name>` creates a project in the folder `<name>`, which must be new or empty. It runs `uv init` (a CLI by default, a typed library with `--lib`), pins Python 3.15, adds ruff and pytest, and writes a starter test, AGENTS.md, CLAUDE.md, an MIT LICENSE (`--license none` skips it), a README, a .gitignore and a CI workflow for Windows and Linux. It stages every file on `main` and stops there, so you make the first commit: `aa init` commits only with `--github`. It leaves no aa config in the project.
 
-`aa init` assumes uv and git are installed, and doesn't look for them first. A missing tool is reported as `unexpected`. A missing git name fails with `step_failed` when the project gets a LICENSE, because the name goes in it.
+`aa init` assumes uv and git are installed, and doesn't look for them first. A missing tool is reported as `unexpected`, and the message names it. A missing git name fails with `step_failed` when the project gets a LICENSE, because the name goes in it. When `aa init` fails partway, the folder stays as it is, and the message tells you to delete it before running `aa init` again.
 
 With `--github`, `aa init` also makes the first commit, `chore: initial commit`, creates a private GitHub repo with the project's name, pushes the commit to it and prints its URL. Add `--public` to make the repo public. It assumes gh is installed and signed in, and the commit step fails with git's error if git can't work out your identity. If creating the repo fails, for example because gh is signed out, the local project and its commit stay, and the fix is the `gh repo create` command to rerun from inside the project. If gh created the repo but the push failed, the fix is the `git push` instead.
 
@@ -72,7 +72,7 @@ The toolkit needs Python 3.14 or newer. Development uses the Python 3.15 pinned 
 
 Every `aa` command follows the same rules, so scripts and AI agents can rely on them:
 
-- `--json` (before or after the subcommand) or `AA_JSON=1` prints exactly one JSON object on stdout: `{"ok": true, "data": ...}` on success, `{"ok": false, "error": {"code", "message", "fix"}}` on failure. A failure may also carry `data` with the partial result.
+- `--json` (before or after the subcommand) or `AA_JSON=1` prints exactly one JSON object on stdout: `{"ok": true, "data": ...}` on success, `{"ok": false, "error": {"code", "message", "fix"}}` on failure.
 - Logs go to stderr. `--verbose` adds debug logs, including the traceback of an unexpected error.
 - Exit codes: `0` success, `1` problems found or an action failed, `2` usage error, `3` unexpected error, `130` stopped with Ctrl+C.
 - Error codes are stable, so scripts can branch on them:
@@ -81,7 +81,7 @@ Every `aa` command follows the same rules, so scripts and AI agents can rely on 
 |---|---|---|
 | `target_not_empty` | `1` | `aa init` found the target folder already has something in it. Nothing was changed. |
 | `target_in_workspace` | `1` | `aa init` found an outer uv workspace whose `members` would include the target. The fix names the `exclude` entry to add. Nothing was changed. |
-| `step_failed` | `1` | An `aa init` step failed. The message names the step and the tool's error. The folder is left as it is. When creating the GitHub repo fails, the fix is the `gh repo create` command to rerun from inside the project, or `git push --set-upstream origin main` when the repo was created and only the push failed. |
+| `step_failed` | `1` | An `aa init` step failed. The message names the step and what went wrong. The folder is left as it is, and the message says to delete it before running `aa init` again. When creating the GitHub repo fails, the fix is the `gh repo create` command to rerun from inside the project, or `git push --set-upstream origin main` when the repo was created and only the push failed. |
 | `usage` | `2` | Bad or conflicting flags, a missing argument, or an `aa init` name that breaks the name rule. Nothing was created. |
 | `aborted` | `130` | Ctrl+C stopped the command. When `aa init` had started writing, the message says the folder was left as it is. |
 | `unexpected` | `3` | An uncaught error, such as uv, git or gh missing from PATH. Rerun with `--verbose` for the traceback. |

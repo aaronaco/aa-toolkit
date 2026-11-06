@@ -23,7 +23,9 @@ _REPO_VARIABLES = {
 def run(tool: str, *args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
     """Run a tool found on PATH, capture its output and log the command and exit code."""
     command_line = " ".join([tool, *args])
-    executable = shutil.which(tool) or tool
+    executable = shutil.which(tool)
+    if executable is None:
+        raise FileNotFoundError(f"{tool} not found on PATH")
     log.debug("Running %s (%s)", command_line, executable)
     result = subprocess.run(
         [executable, *args],

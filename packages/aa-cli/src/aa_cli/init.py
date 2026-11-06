@@ -130,8 +130,31 @@ def _matches(member: str, patterns: list[str]) -> bool:
     return any(path.full_match(pattern.removeprefix("./").rstrip("/")) for pattern in patterns)
 
 
+@contextlib.contextmanager
+def _rerun_note(target: Path) -> Iterator[None]:
+    """Add to a failure what stops ``aa init`` from running again: what it left in ``target``."""
+
+    def note() -> str:
+        if is_empty_folder_or_missing(target):
+            return ""
+        return f"The folder {target} was left as it is; delete it before running aa init again."
+
+    try:
+        yield
+    except StepFailed as exc:
+        detail = "\n".join(filter(None, [exc.detail, note()]))
+        raise StepFailed(exc.step, detail, exc.fix) from exc
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(" ".join(filter(None, [f"{exc}.", note()]))) from exc
+
+
 def create_project(target: Path, kind: Kind, license_choice: License) -> list[str]:
     """Create the project in ``target`` (missing or empty) and return the files it holds."""
+    with _rerun_note(target):
+        return _build_project(target, kind, license_choice)
+
+
+def _build_project(target: Path, kind: Kind, license_choice: License) -> list[str]:
     target.mkdir(exist_ok=True)
     # aa makes the repo itself: uv init skips it inside another repo, and the
     # branch must be main whatever the machine's default is.
@@ -164,16 +187,17 @@ def create_project(target: Path, kind: Kind, license_choice: License) -> list[st
         "pytest",
     )
     _write_files(target, kind, license_choice)
-    # The folder holds only what aa just made, so the project's .gitignore decides. A global
-    # rule like *.lock would drop a file the project's CI needs, and git add wouldn't say so.
+    # The folder holds only what aa just made, so global ignore rules have nothing to protect.
+    # One like *.lock would drop a file the project's CI needs, and git add wouldn't say so.
     _step("stage files", target, "git", "-c", "core.excludesFile=", "add", "--all")
     listed = _step("list files", target, "git", "ls-files")
     return sorted(listed.splitlines())
 
 
-def create_github_repo(target: Path, public: bool) -> str:
+def commit_and_push_to_github(target: Path, public: bool) -> str:
     """Commit the project in ``target``, create its GitHub repo, push and return the repo's URL."""
-    _step("initial commit", target, "git", "commit", "--quiet", "--message", COMMIT_MESSAGE)
+    with _rerun_note(target):
+        _step("initial commit", target, "git", "commit", "--quiet", "--message", COMMIT_MESSAGE)
     args = [
         "repo",
         "create",
@@ -186,6 +210,8 @@ def create_github_repo(target: Path, public: bool) -> str:
     kept = f"The project at {target} is kept; run the fix from inside it."
     try:
         stdout = _step("create GitHub repo", target, "gh", *args)
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(f"{exc}. The project at {target} is kept.") from exc
     except StepFailed as exc:
         # gh adds the new repo as origin before it pushes. Once origin is there,
         # rerunning gh repo create fails on the taken name; only the push is left.

@@ -18,7 +18,8 @@ def test_verbose_logs_each_external_command_and_its_exit_code_to_stderr(aa_in, m
     loud = aa_in(tmp_path / "loud", "init", "demo", "--json", "--verbose", env=machine.env)
 
     assert "git init" not in quiet.stderr
-    assert loud.stdout == quiet.stdout
+    # The error names the folder, and that is the one difference between the two runs.
+    assert loud.stdout.replace("loud", "quiet") == quiet.stdout
     lines = loud.stderr.splitlines()
     assert any("git init" in line and "exit 0" in line for line in lines)
     assert any("uv init" in line and "exit 1" in line for line in lines)

@@ -6,6 +6,7 @@ import pytest
 
 REMOVED = re.compile(
     r"aa doctor|\[tool\.aa\]|preflight_failed|checks_failed|\bchecks\b|\*\*Check\*\*"
+    r"|carry `data`"
 )
 
 

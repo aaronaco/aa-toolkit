@@ -137,7 +137,7 @@ def test_the_created_project_has_the_standard_files(cli_project):
         assert command in agents, command
     assert "Conventional Commits" in agents
     gitignore = cli_project.read(".gitignore").splitlines()
-    for pattern in (".venv/", "__pycache__/", ".pytest_cache/", ".ruff_cache/", "dist/"):
+    for pattern in (".venv/", "__pycache__/", ".pytest_cache/", ".ruff_cache/", "/dist/"):
         assert pattern in gitignore, pattern
 
 
@@ -202,6 +202,17 @@ def test_init_stages_every_file_on_main_and_makes_no_commit(cli_project):
     assert_staged_with_no_commits(cli_project)
     assert set(cli_project.git("diff", "--cached", "--name-only").splitlines()) == EXPECTED_FILES
     assert cli_project.git("branch", "--show-current").strip() == "main"
+
+
+@pytest.mark.parametrize("name", ["build", "dist", "wheels", "htmlcov"])
+def test_a_project_named_like_a_build_folder_stages_its_own_package(aa_in, machine, tmp_path, name):
+    result = aa_in(tmp_path, "init", name, "--json", env=local_machine(machine).env)
+
+    assert result.exit_code == 0, result.output
+    package = f"src/{name}/__init__.py"
+    assert package in json.loads(result.stdout)["data"]["files"]
+    created = Created(result, tmp_path / name, git_env(machine))
+    assert package in created.git("diff", "--cached", "--name-only").splitlines()
 
 
 def test_init_stages_files_the_developers_own_git_ignore_rules_would_drop(aa_in, machine, tmp_path):
@@ -402,9 +413,29 @@ def test_a_missing_tool_is_reported_as_unexpected_with_no_check_first(aa, machin
     result = aa("init", "demo", "--json", env=machine.env)
 
     assert result.exit_code == 3
-    envelope = json.loads(result.stdout)
-    assert envelope["error"]["code"] == "unexpected"
-    assert "data" not in envelope
+    error = json.loads(result.stdout)["error"]
+    assert error["code"] == "unexpected"
+    assert f"{missing} not found on PATH" in error["message"]
+
+
+def test_a_missing_tool_after_the_folder_has_content_says_to_delete_it(aa, machine, tmp_path):
+    machine.add_real("git")
+    machine.set_identity()
+
+    result = aa("init", "demo", "--json", env=machine.env)
+
+    message = json.loads(result.stdout)["error"]["message"]
+    assert str((tmp_path / "demo").resolve()) in message
+    assert "delete it before running aa init again" in message
+
+
+def test_a_missing_tool_before_anything_is_written_says_nothing_about_deleting(aa, machine):
+    machine.add_real("uv")
+    machine.set_identity()
+
+    result = aa("init", "demo", "--json", env=machine.env)
+
+    assert "delete" not in json.loads(result.stdout)["error"]["message"]
 
 
 def no_identity_env(machine) -> dict[str, str | None]:
@@ -447,6 +478,7 @@ def test_init_github_without_a_git_identity_fails_the_initial_commit_with_gits_e
     assert error["code"] == "step_failed"
     assert "initial commit" in error["message"]
     assert "user.email" in error["message"]
+    assert "delete it before running aa init again" in error["message"]
     assert repo_creates(machine) == []
 
 
@@ -462,6 +494,7 @@ def test_a_license_without_a_git_name_is_step_failed_and_never_committed(aa_in, 
     assert error["code"] == "step_failed"
     assert "user.name" in error["message"]
     assert error["fix"] == 'git config --global user.name "Your Name"'
+    assert "delete it before running aa init again" in error["message"]
     assert not (created.project / "LICENSE").exists()
 
 
@@ -590,6 +623,7 @@ def test_a_failed_step_is_step_failed_with_the_step_and_its_stderr(aa_in, machin
     assert error["code"] == "step_failed"
     assert "uv init" in error["message"]
     assert "fake uv: the index is unreachable" in error["message"]
+    assert "delete it before running aa init again" in error["message"]
     assert (tmp_path / "demo").is_dir()
 
 
@@ -708,7 +742,10 @@ def test_init_github_without_gh_keeps_the_project_and_reports_unexpected(aa_in, 
     created = init(aa_in, tmp_path, local_machine(machine), "--github")
 
     assert created.result.exit_code == 3
-    assert created.envelope["error"]["code"] == "unexpected"
+    error = created.envelope["error"]
+    assert error["code"] == "unexpected"
+    assert "gh not found on PATH" in error["message"]
+    assert f"{created.project.resolve()} is kept" in error["message"]
     assert created.git("log", "--format=%s").splitlines() == [COMMIT_MESSAGE]
 
 

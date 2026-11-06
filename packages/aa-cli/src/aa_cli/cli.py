@@ -19,7 +19,7 @@ from aa_cli.init import (
     Kind,
     License,
     StepFailed,
-    create_github_repo,
+    commit_and_push_to_github,
     create_project,
     is_empty_folder_or_missing,
     is_valid_name,
@@ -197,7 +197,7 @@ def init(
         raise typer.Exit(ExitCode.PROBLEMS)
     try:
         created = create_project(target, kind, license_choice)
-        github_url = create_github_repo(target, public) if github else None
+        github_url = commit_and_push_to_github(target, public) if github else None
     except StepFailed as exc:
         out.failure("step_failed", str(exc), fix=exc.fix)
         raise typer.Exit(ExitCode.PROBLEMS) from exc
