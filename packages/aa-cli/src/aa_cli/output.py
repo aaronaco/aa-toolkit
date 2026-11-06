@@ -83,8 +83,7 @@ class Output:
 def configure_logging(verbose: bool) -> None:
     """Send aa's logs to stderr: debug with --verbose, warnings otherwise."""
     logger = logging.getLogger("aa")
-    for handler in list(logger.handlers):
-        logger.removeHandler(handler)
+    logger.handlers.clear()
     handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
     logger.addHandler(handler)

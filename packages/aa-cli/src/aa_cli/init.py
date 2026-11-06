@@ -20,6 +20,8 @@ log = logging.getLogger("aa")
 PYTHON_VERSION = "3.15"
 COMMIT_MESSAGE = "chore: initial commit"
 BRANCH = "main"
+PYPROJECT = "pyproject.toml"
+WRITE_FILES_STEP = "write files"
 
 NAME_RULE = (
     "a project name starts with a letter, ends with a letter or digit, holds only"
@@ -69,7 +71,7 @@ class OuterWorkspace:
 
     @property
     def fix(self) -> str:
-        pyproject = self.root / "pyproject.toml"
+        pyproject = self.root / PYPROJECT
         return (
             f'Under [tool.uv.workspace] in {pyproject}, add exclude = ["{self.member}"]'
             f' (or add "{self.member}" to the existing exclude list)'
@@ -101,7 +103,7 @@ def outer_workspace_taking_in(target: Path) -> OuterWorkspace | None:
     how it was created, and a project of its own there breaks the outer lock.
     """
     for folder in target.parents:
-        workspace = _uv_workspace(folder / "pyproject.toml")
+        workspace = _uv_workspace(folder / PYPROJECT)
         if workspace is None:
             continue
         member = target.relative_to(folder).as_posix()
@@ -245,7 +247,7 @@ def _file_step(step: str) -> Iterator[None]:
 
 
 def _add_uv_workspace(target: Path) -> None:
-    pyproject = target / "pyproject.toml"
+    pyproject = target / PYPROJECT
     with _file_step("add uv workspace"):
         text = pyproject.read_text(encoding="utf-8")
         _write(pyproject, text.rstrip("\n") + "\n\n" + _render("pyproject.toml.tmpl"))
@@ -273,9 +275,9 @@ def _write_files(target: Path, kind: Kind, license_choice: License) -> None:
         # Nothing else stops a blank holder: git can make up an author for a commit.
         if not values["holder"]:
             detail = "the LICENSE needs a holder, but git's user.name is not set"
-            raise StepFailed("write files", detail, 'git config --global user.name "Your Name"')
+            raise StepFailed(WRITE_FILES_STEP, detail, 'git config --global user.name "Your Name"')
         outputs["LICENSE"] = "LICENSE.tmpl"
-    with _file_step("write files"):
+    with _file_step(WRITE_FILES_STEP):
         for path, template in outputs.items():
             _write(target / path, _render(template, **values))
 
@@ -284,7 +286,7 @@ def _package_name(target: Path) -> str:
     """The import name uv init chose: the one package folder under ``src``."""
     packages = [path.name for path in (target / "src").iterdir() if path.is_dir()]
     if len(packages) != 1:
-        raise StepFailed("write files", f"expected one package under src, found {packages}")
+        raise StepFailed(WRITE_FILES_STEP, f"expected one package under src, found {packages}")
     return packages[0]
 
 
