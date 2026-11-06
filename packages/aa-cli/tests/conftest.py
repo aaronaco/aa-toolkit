@@ -28,21 +28,21 @@ from pathlib import Path
 
 here = Path(__file__).parent
 state = json.loads((here / "gh-state.json").read_text())
+git = shutil.which("git")
+log = subprocess.run([git, "log", "-1", "--format=%s"], capture_output=True, text=True)
 with (here / "gh-calls.jsonl").open("a") as calls:
-    calls.write(json.dumps({"args": sys.argv[1:], "cwd": os.getcwd()}) + "\n")
-if sys.argv[1:3] == ["auth", "status"]:
-    if state["signed_in"]:
-        print("Logged in to github.com account test-user")
-        sys.exit(0)
-    print("You are not logged into any GitHub hosts.", file=sys.stderr)
-    sys.exit(1)
+    call = {"args": sys.argv[1:], "cwd": os.getcwd(), "last_commit": log.stdout.strip() or None}
+    calls.write(json.dumps(call) + "\n")
 if sys.argv[1:3] == ["repo", "create"]:
+    if not state["signed_in"]:
+        print("To get started with GitHub CLI, please run:  gh auth login", file=sys.stderr)
+        sys.exit(4)
     if state["repo_create_fails"]:
         print("GraphQL: Name already exists on this account (createRepository)", file=sys.stderr)
         sys.exit(1)
     # Like gh: the repo exists and is the origin remote before the push runs.
     url = f"https://github.com/test-user/{sys.argv[3]}"
-    subprocess.run([shutil.which("git"), "remote", "add", "origin", url + ".git"], check=True)
+    subprocess.run([git, "remote", "add", "origin", url + ".git"], check=True)
     if state["push_fails"]:
         print("failed to run git: exit status 128", file=sys.stderr)
         sys.exit(1)
@@ -59,10 +59,11 @@ sys.exit(2)
 
 @dataclass(frozen=True)
 class GhCall:
-    """One run of the fake gh: its arguments and the folder it ran in."""
+    """One run of the fake gh: its arguments, its folder and the commit there at that moment."""
 
     args: list[str]
     cwd: Path
+    last_commit: str | None
 
 
 OLD_GIT = """\
@@ -149,8 +150,8 @@ class Machine:
         """Put a fake gh on PATH, signed in or signed out, that records every call.
 
         ``gh repo create <name>`` adds the new repo as the origin remote and
-        prints its URL. ``repo_create_fails`` makes it fail before that,
-        ``push_fails`` makes it fail after adding the remote, and
+        prints its URL. Signed out or with ``repo_create_fails`` it fails before
+        that, ``push_fails`` makes it fail after adding the remote, and
         ``prints_url=False`` makes it print nothing (``gh repo view`` still
         gives the URL).
         """
@@ -170,7 +171,7 @@ class Machine:
         if not log.exists():
             return []
         calls = [json.loads(line) for line in log.read_text().splitlines()]
-        return [GhCall(call["args"], Path(call["cwd"])) for call in calls]
+        return [GhCall(call["args"], Path(call["cwd"]), call["last_commit"]) for call in calls]
 
     def add_failing(self, name: str, message: str) -> None:
         """Put a tool on PATH that prints ``message`` to stderr and fails on every call."""
@@ -209,13 +210,11 @@ class Machine:
         pairs = (("user.name", name), ("user.email", email))
         self._identity = {key: value for key, value in pairs if value is not None}
 
-    def full(self) -> Machine:
-        """uv, git, a git identity and a signed-in gh."""
-        self.add_real("uv")
-        self.add_real("git")
-        self.add_gh(signed_in=True)
-        self.set_identity()
-        return self
+    def ignore_globally(self, *patterns: str) -> None:
+        """Add ignore rules of the developer's own, through git's ``core.excludesFile``."""
+        ignore = self._gitconfig.with_name("global-ignore")
+        ignore.write_text("\n".join(patterns) + "\n")
+        self._gitconfig.write_text(f'[core]\n\texcludesFile = "{ignore.as_posix()}"\n')
 
     def _write_shim(self, name: str, command: list[str]) -> None:
         if os.name == "nt":
@@ -252,6 +251,15 @@ def aa_in():
             return CliRunner().invoke(app, list(args), env={"AA_JSON": None, **(env or {})})
 
     return run
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _no_ambient_git_repo():
+    """Keep a git hook that runs the suite from sending the tests' git commands to its repo."""
+    with pytest.MonkeyPatch.context() as patch:
+        for variable in ("GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE"):
+            patch.delenv(variable, raising=False)
+        yield
 
 
 @pytest.fixture(autouse=True)

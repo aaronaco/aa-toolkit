@@ -30,9 +30,11 @@ aa --version
 
 ## Commands
 
-`aa init <name>` creates a project in the folder `<name>`, which must be new or empty. It runs `uv init` (a CLI by default, a typed library with `--lib`), pins Python 3.15, records the project kind under `[tool.aa]` in pyproject, adds ruff and pytest, and writes a starter test, AGENTS.md, CLAUDE.md, an MIT LICENSE (`--license none` skips it), a README, a .gitignore and a CI workflow for Windows and Linux. It ends with one commit, `chore: initialize project with aa`. It checks uv, git and your git identity first, and creates nothing if one is missing.
+`aa init <name>` creates a project in the folder `<name>`, which must be new or empty. It runs `uv init` (a CLI by default, a typed library with `--lib`), pins Python 3.15, adds ruff and pytest, and writes a starter test, AGENTS.md, CLAUDE.md, an MIT LICENSE (`--license none` skips it), a README, a .gitignore and a CI workflow for Windows and Linux. It stages every file on `main` and stops there, so you make the first commit: `aa init` commits only with `--github`. It leaves no aa config in the project.
 
-With `--github`, `aa init` also creates a private GitHub repo with the project's name, pushes the first commit to it and prints its URL. Add `--public` to make the repo public. It then also checks that gh is installed and signed in before creating anything. If creating the repo fails, the local project and its commit stay, and the fix is the `gh repo create` command to rerun from inside the project. If gh created the repo but the push failed, the fix is the `git push` instead.
+`aa init` assumes uv and git are installed, and doesn't look for them first. A missing tool is reported as `unexpected`, and the message names it. A missing git name fails with `step_failed` when the project gets a LICENSE, because the name goes in it. When `aa init` fails partway, the folder stays as it is, and the message tells you to delete it before running `aa init` again.
+
+With `--github`, `aa init` also makes the first commit, `chore: initial commit`, creates a private GitHub repo with the project's name, pushes the commit to it and prints its URL. Add `--public` to make the repo public. It assumes gh is installed and signed in, and the commit step fails with git's error if git can't work out your identity. If creating the repo fails, for example because gh is signed out, the local project and its commit stay, and the fix is the `gh repo create` command to rerun from inside the project. If gh created the repo but the push failed, the fix is the `git push` instead.
 
 The name is also the folder and the package name, so it must start with a letter, end with a letter or digit, hold only letters, digits, `-` and `_`, and be neither a Python keyword nor a name Windows reserves (`con`, `prn`, `aux`, `nul`, `com0`-`com9`, `lpt0`-`lpt9`). Any other name is refused as a usage error before anything is created, never renamed. `aa init .` creates the project in the current folder, which must be empty and whose name follows the same rule.
 
@@ -44,12 +46,6 @@ aa init my-app
 
 ```bash
 aa init my-app --github
-```
-
-`aa doctor` checks the machine: uv, git and gh on PATH, your git name and email, and the gh sign-in. Run inside a project, from its folder or any subfolder, it also checks the project: a valid `kind` under `[tool.aa]`, `.python-version`, a lockfile in sync with pyproject (`uv lock --check`), AGENTS.md and the CI workflow. A folder whose nearest pyproject has no `[tool.aa]` is not a project, which is reported as info and never fails. Every failed check shows its fix: the command that fixes it, or, when no command can (an unknown `kind`, or a file git has no copy of), what to change. It exits `1` when any check fails.
-
-```bash
-aa doctor
 ```
 
 ## Develop
@@ -76,18 +72,16 @@ The toolkit needs Python 3.14 or newer. Development uses the Python 3.15 pinned 
 
 Every `aa` command follows the same rules, so scripts and AI agents can rely on them:
 
-- `--json` (before or after the subcommand) or `AA_JSON=1` prints exactly one JSON object on stdout: `{"ok": true, "data": ...}` on success, `{"ok": false, "error": {"code", "message", "fix"}}` on failure. A failure may also carry `data` with the partial result. For example, `aa doctor` returns the full check list there.
+- `--json` (before or after the subcommand) or `AA_JSON=1` prints exactly one JSON object on stdout: `{"ok": true, "data": ...}` on success, `{"ok": false, "error": {"code", "message", "fix"}}` on failure.
 - Logs go to stderr. `--verbose` adds debug logs, including the traceback of an unexpected error.
 - Exit codes: `0` success, `1` problems found or an action failed, `2` usage error, `3` unexpected error, `130` stopped with Ctrl+C.
 - Error codes are stable, so scripts can branch on them:
 
 | Code | Exit | Meaning |
 |---|---|---|
-| `checks_failed` | `1` | `aa doctor` found at least one failed check. `data.checks` holds every check. |
 | `target_not_empty` | `1` | `aa init` found the target folder already has something in it. Nothing was changed. |
 | `target_in_workspace` | `1` | `aa init` found an outer uv workspace whose `members` would include the target. The fix names the `exclude` entry to add. Nothing was changed. |
-| `preflight_failed` | `1` | `aa init` found uv, git or the git identity missing, or with `--github`, gh missing or signed out. `data.checks` holds the failed checks. Nothing was created. |
-| `step_failed` | `1` | An `aa init` step failed. The message names the step and the tool's error. The folder is left as it is. When creating the GitHub repo fails, the fix is the `gh repo create` command to rerun from inside the project, or `git push --set-upstream origin main` when the repo was created and only the push failed. |
+| `step_failed` | `1` | An `aa init` step failed. The message names the step and what went wrong. The folder is left as it is, and the message says to delete it before running `aa init` again. When creating the GitHub repo fails, the fix is the `gh repo create` command to rerun from inside the project, or `git push --set-upstream origin main` when the repo was created and only the push failed. |
 | `usage` | `2` | Bad or conflicting flags, a missing argument, or an `aa init` name that breaks the name rule. Nothing was created. |
 | `aborted` | `130` | Ctrl+C stopped the command. When `aa init` had started writing, the message says the folder was left as it is. |
-| `unexpected` | `3` | An uncaught error. Rerun with `--verbose` for the traceback. |
+| `unexpected` | `3` | An uncaught error, such as uv, git or gh missing from PATH. Rerun with `--verbose` for the traceback. |

@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-COMMIT_MESSAGE = "chore: initialize project with aa"
+COMMIT_MESSAGE = "chore: initial commit"
 EXPECTED_FILES = {
     ".github/workflows/ci.yml",
     ".gitignore",
@@ -57,6 +57,13 @@ def run_git(cwd: Path, env: dict[str, str], *args: str) -> str:
     return result.stdout
 
 
+def assert_staged_with_no_commits(created: Created) -> None:
+    assert created.git("rev-list", "--all", "--count").strip() == "0"
+    statuses = created.git("status", "--porcelain").splitlines()
+    assert statuses
+    assert all(status.startswith("A  ") for status in statuses), statuses
+
+
 def git_env(machine) -> dict[str, str]:
     """The real PATH with the stand-in machine's throwaway git identity."""
     return {**os.environ, **{k: v for k, v in machine.env.items() if k != "PATH"}}
@@ -91,8 +98,15 @@ def test_init_without_a_kind_creates_a_cli_project(cli_project):
     assert cli_project.result.exit_code == 0, cli_project.result.output
     assert cli_project.envelope["ok"] is True
     assert cli_project.envelope["data"]["kind"] == "cli"
-    assert cli_project.pyproject["tool"]["aa"] == {"kind": "cli"}
     assert cli_project.pyproject["project"]["scripts"] == {"demo": "demo:main"}
+
+
+@pytest.mark.parametrize("kind", ["cli_project", "lib_project"])
+def test_the_created_project_has_no_aa_config_and_is_its_own_uv_workspace(request, kind):
+    tool = request.getfixturevalue(kind).pyproject["tool"]
+
+    assert "aa" not in tool
+    assert "workspace" in tool["uv"]
 
 
 def test_init_json_data_has_the_path_kind_files_and_no_github_url(cli_project):
@@ -108,7 +122,6 @@ def test_init_json_data_has_the_path_kind_files_and_no_github_url(cli_project):
 def test_init_lib_creates_a_typed_library_without_a_command(lib_project):
     assert lib_project.result.exit_code == 0, lib_project.result.output
     assert lib_project.envelope["data"]["kind"] == "lib"
-    assert lib_project.pyproject["tool"]["aa"] == {"kind": "lib"}
     assert "scripts" not in lib_project.pyproject["project"]
     assert (lib_project.project / "src" / "demo" / "py.typed").is_file()
     assert "src/demo/py.typed" in lib_project.envelope["data"]["files"]
@@ -124,7 +137,7 @@ def test_the_created_project_has_the_standard_files(cli_project):
         assert command in agents, command
     assert "Conventional Commits" in agents
     gitignore = cli_project.read(".gitignore").splitlines()
-    for pattern in (".venv/", "__pycache__/", ".pytest_cache/", ".ruff_cache/", "dist/"):
+    for pattern in (".venv/", "__pycache__/", ".pytest_cache/", ".ruff_cache/", "/dist/"):
         assert pattern in gitignore, pattern
 
 
@@ -133,6 +146,29 @@ def test_the_license_is_mit_with_the_git_name_and_current_year(cli_project):
 
     assert license_text.startswith("MIT License")
     assert f"Copyright (c) {datetime.date.today().year} Ada Lovelace" in license_text
+
+
+def test_the_license_ignores_a_git_name_set_only_in_the_repo_aa_runs_in(aa_in, machine, tmp_path):
+    machine = local_machine(machine)
+    run_git(tmp_path, git_env(machine), "init", "-q")
+    run_git(tmp_path, git_env(machine), "config", "user.name", "Repo User")
+
+    created = init(aa_in, tmp_path, machine)
+
+    assert created.result.exit_code == 0, created.result.output
+    assert "Ada Lovelace" in created.read("LICENSE")
+    assert "Repo User" not in created.read("LICENSE")
+
+
+def test_the_license_has_the_git_name_on_git_older_than_2_26(aa_in, machine, tmp_path):
+    machine.add_real("uv")
+    machine.add_old_git()
+    machine.set_identity(name="Ada Lovelace", email="ada@example.com")
+
+    created = init(aa_in, tmp_path, machine)
+
+    assert created.result.exit_code == 0, created.result.output
+    assert "Ada Lovelace" in created.read("LICENSE")
 
 
 def test_the_readme_has_the_name_and_the_install_test_and_lint_commands(cli_project):
@@ -162,10 +198,32 @@ def test_the_ci_workflow_runs_lint_and_tests_on_windows_and_linux(cli_project):
     ]
 
 
-def test_the_history_is_one_initial_commit_on_main_with_a_clean_tree(cli_project):
-    assert cli_project.git("log", "--format=%s").splitlines() == [COMMIT_MESSAGE]
+def test_init_stages_every_file_on_main_and_makes_no_commit(cli_project):
+    assert_staged_with_no_commits(cli_project)
+    assert set(cli_project.git("diff", "--cached", "--name-only").splitlines()) == EXPECTED_FILES
     assert cli_project.git("branch", "--show-current").strip() == "main"
-    assert cli_project.git("status", "--porcelain") == ""
+
+
+@pytest.mark.parametrize("name", ["build", "dist", "wheels", "htmlcov"])
+def test_a_project_named_like_a_build_folder_stages_its_own_package(aa_in, machine, tmp_path, name):
+    result = aa_in(tmp_path, "init", name, "--json", env=local_machine(machine).env)
+
+    assert result.exit_code == 0, result.output
+    package = f"src/{name}/__init__.py"
+    assert package in json.loads(result.stdout)["data"]["files"]
+    created = Created(result, tmp_path / name, git_env(machine))
+    assert package in created.git("diff", "--cached", "--name-only").splitlines()
+
+
+def test_init_stages_files_the_developers_own_git_ignore_rules_would_drop(aa_in, machine, tmp_path):
+    machine = local_machine(machine)
+    machine.ignore_globally("*.lock", ".python-version")
+
+    created = init(aa_in, tmp_path, machine)
+
+    assert created.result.exit_code == 0, created.result.output
+    assert set(created.git("diff", "--cached", "--name-only").splitlines()) == EXPECTED_FILES
+    assert set(created.envelope["data"]["files"]) == EXPECTED_FILES
 
 
 @pytest.mark.parametrize("kind", ["cli_project", "lib_project"])
@@ -304,7 +362,7 @@ def test_license_none_creates_no_license_file(aa_in, machine, tmp_path):
     assert created.result.exit_code == 0, created.result.output
     assert not (created.project / "LICENSE").exists()
     assert "LICENSE" not in created.envelope["data"]["files"]
-    assert created.git("status", "--porcelain") == ""
+    assert_staged_with_no_commits(created)
 
 
 def test_init_into_an_existing_empty_folder_creates_the_project_there(aa_in, machine, tmp_path):
@@ -344,40 +402,117 @@ def test_a_file_named_like_the_project_is_target_not_empty(aa, machine, tmp_path
     assert (tmp_path / "demo").read_text() == "keep me"
 
 
-@pytest.mark.parametrize(
-    ("missing", "failed"),
-    [
-        ("uv", ["uv"]),
-        ("git", ["git", "git_identity"]),
-        ("identity", ["git_identity"]),
-    ],
-)
-def test_a_missing_tool_or_identity_fails_preflight_before_creating_anything(
-    aa, machine, tmp_path, missing, failed
-):
+@pytest.mark.parametrize("missing", ["uv", "git"])
+def test_a_missing_tool_is_reported_as_unexpected_with_no_check_first(aa, machine, missing):
     if missing != "uv":
         machine.add_real("uv")
     if missing != "git":
         machine.add_real("git")
-    if missing != "identity":
-        machine.set_identity()
+    machine.set_identity()
 
     result = aa("init", "demo", "--json", env=machine.env)
 
+    assert result.exit_code == 3
+    error = json.loads(result.stdout)["error"]
+    assert error["code"] == "unexpected"
+    assert f"{missing} not found on PATH" in error["message"]
+
+
+def test_a_missing_tool_after_the_folder_has_content_says_to_delete_it(aa, machine, tmp_path):
+    machine.add_real("git")
+    machine.set_identity()
+
+    result = aa("init", "demo", "--json", env=machine.env)
+
+    message = json.loads(result.stdout)["error"]["message"]
+    assert str((tmp_path / "demo").resolve()) in message
+    assert "delete it before running aa init again" in message
+
+
+def test_a_missing_tool_before_anything_is_written_says_nothing_about_deleting(aa, machine):
+    machine.add_real("uv")
+    machine.set_identity()
+
+    result = aa("init", "demo", "--json", env=machine.env)
+
+    assert "delete" not in json.loads(result.stdout)["error"]["message"]
+
+
+def no_identity_env(machine) -> dict[str, str | None]:
+    """The machine's env, with git left no identity: none inherited, none made up from the host."""
+    return {
+        **machine.env,
+        "GIT_AUTHOR_NAME": None,
+        "GIT_AUTHOR_EMAIL": None,
+        "GIT_COMMITTER_NAME": None,
+        "GIT_COMMITTER_EMAIL": None,
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "user.useConfigOnly",
+        "GIT_CONFIG_VALUE_0": "true",
+    }
+
+
+def test_init_without_github_makes_no_commit_so_it_needs_no_git_identity(aa_in, machine, tmp_path):
+    machine.add_real("uv")
+    machine.add_real("git")
+    env = no_identity_env(machine)
+
+    result = aa_in(tmp_path, "init", "demo", "--license", "none", "--json", env=env)
+
+    assert result.exit_code == 0, result.output
+    assert_staged_with_no_commits(Created(result, tmp_path / "demo", git_env(machine)))
+
+
+def test_init_github_without_a_git_identity_fails_the_initial_commit_with_gits_error(
+    aa_in, machine, tmp_path
+):
+    machine.add_real("uv")
+    machine.add_real("git")
+    machine.add_gh()
+    env = no_identity_env(machine)
+
+    result = aa_in(tmp_path, "init", "demo", "--license", "none", "--github", "--json", env=env)
+
     assert result.exit_code == 1
-    envelope = json.loads(result.stdout)
-    assert envelope["error"]["code"] == "preflight_failed"
-    assert envelope["error"]["fix"]
-    assert [check["id"] for check in envelope["data"]["checks"]] == failed
-    doctor = json.loads(aa("doctor", "--json", env=machine.env).stdout)["data"]["checks"]
-    doctor = {check["id"]: check for check in doctor}
-    for check in envelope["data"]["checks"]:
-        assert check == doctor[check["id"]]
-    assert list(tmp_path.iterdir()) == []
+    error = json.loads(result.stdout)["error"]
+    assert error["code"] == "step_failed"
+    assert "initial commit" in error["message"]
+    assert "user.email" in error["message"]
+    assert "delete it before running aa init again" in error["message"]
+    assert repo_creates(machine) == []
 
 
-def test_preflight_does_not_need_gh(cli_project):
+def test_a_license_without_a_git_name_is_step_failed_and_never_committed(aa_in, machine, tmp_path):
+    machine.add_real("uv")
+    machine.add_real("git")
+    machine.set_identity(name=None, email="ada@example.com")
+
+    created = init(aa_in, tmp_path, machine)
+
+    assert created.result.exit_code == 1
+    error = created.envelope["error"]
+    assert error["code"] == "step_failed"
+    assert "user.name" in error["message"]
+    assert error["fix"] == 'git config --global user.name "Your Name"'
+    assert "delete it before running aa init again" in error["message"]
+    assert not (created.project / "LICENSE").exists()
+
+
+def test_a_local_init_does_not_need_gh(cli_project):
     assert cli_project.result.exit_code == 0
+
+
+@pytest.mark.parametrize("ok", [True, False], ids=["created", "target-not-empty"])
+def test_aa_json_env_gives_init_one_envelope_whose_ok_matches_the_exit_code(
+    aa, machine, tmp_path, ok
+):
+    if not ok:
+        (tmp_path / "demo").write_text("keep me")
+
+    result = aa("init", "demo", env={**local_machine(machine).env, "AA_JSON": "1"})
+
+    assert json.loads(result.stdout)["ok"] is ok
+    assert result.exit_code == (0 if ok else 1)
 
 
 OUTER_PYPROJECT = '[project]\nname = "outer"\nversion = "0.1.0"\nrequires-python = ">=3.14"\n\n'
@@ -420,7 +555,7 @@ def test_init_inside_another_uv_workspace_does_not_join_or_break_it(
     assert (created.project / "uv.lock").is_file()
     toplevel = Path(created.git("rev-parse", "--show-toplevel").strip())
     assert toplevel.resolve() == created.project.resolve()
-    assert created.git("log", "--format=%s").splitlines() == [COMMIT_MESSAGE]
+    assert_staged_with_no_commits(created)
     outer_log = subprocess.run(["git", "log"], cwd=tmp_path, env=env, capture_output=True)
     assert outer_log.returncode != 0  # the outer repo still has no commits
 
@@ -451,6 +586,31 @@ def test_init_where_an_outer_workspace_would_take_the_project_in_stops_first(
     assert outer_still_locks(tmp_path)
 
 
+@pytest.mark.parametrize(
+    ("variable", "path"),
+    [("GIT_INDEX_FILE", ".git/index"), ("GIT_DIR", ".git")],
+    ids=["index", "git-dir"],
+)
+def test_git_variables_set_by_a_hook_leave_the_repo_aa_runs_in_alone(
+    aa_in, machine, tmp_path, variable, path
+):
+    machine = local_machine(machine)
+    env = git_env(machine)
+    run_git(tmp_path, env, "init", "-q")
+    (tmp_path / "notes.txt").write_text("keep me")
+    run_git(tmp_path, env, "add", "notes.txt")
+    index = tmp_path / ".git" / "index"
+    before = index.read_bytes()
+
+    result = aa_in(
+        tmp_path, "init", "demo", "--json", env={**machine.env, variable: str(tmp_path / path)}
+    )
+
+    assert result.exit_code == 0, result.output
+    assert index.read_bytes() == before
+    assert_staged_with_no_commits(Created(result, tmp_path / "demo", env))
+
+
 def test_a_failed_step_is_step_failed_with_the_step_and_its_stderr(aa_in, machine, tmp_path):
     machine.add_real("git")
     machine.set_identity()
@@ -463,6 +623,7 @@ def test_a_failed_step_is_step_failed_with_the_step_and_its_stderr(aa_in, machin
     assert error["code"] == "step_failed"
     assert "uv init" in error["message"]
     assert "fake uv: the index is unreachable" in error["message"]
+    assert "delete it before running aa init again" in error["message"]
     assert (tmp_path / "demo").is_dir()
 
 
@@ -515,11 +676,27 @@ def test_init_github_json_data_has_the_repo_url(github_project):
     assert created.envelope["data"]["github_url"] == GITHUB_URL
 
 
-def test_init_github_runs_after_the_initial_commit(github_project):
-    created, _ = github_project
+def test_init_github_pushes_one_initial_commit_on_main_with_a_clean_tree(github_project):
+    created, machine = github_project
 
+    [call] = repo_creates(machine)
+    assert "--push" in call.args
+    assert call.last_commit == COMMIT_MESSAGE
     assert created.git("log", "--format=%s").splitlines() == [COMMIT_MESSAGE]
+    assert created.git("branch", "--show-current").strip() == "main"
     assert created.git("status", "--porcelain") == ""
+
+
+def test_init_github_commits_files_the_developers_own_git_ignore_rules_would_drop(
+    aa_in, machine, tmp_path
+):
+    machine = github_machine(machine)
+    machine.ignore_globally("*.lock", ".python-version")
+
+    created = init(aa_in, tmp_path, machine, "--github")
+
+    assert created.result.exit_code == 0, created.result.output
+    assert set(created.git("ls-tree", "-r", "--name-only", "HEAD").splitlines()) == EXPECTED_FILES
 
 
 def test_init_github_public_creates_a_public_repo_and_shows_its_url(aa, machine):
@@ -545,27 +722,31 @@ def test_public_without_github_is_a_usage_error_and_creates_nothing(aa, machine,
     assert repo_creates(machine) == []
 
 
-@pytest.mark.parametrize(
-    ("gh_on_path", "failed"),
-    [(False, ["gh", "gh_auth"]), (True, ["gh_auth"])],
-    ids=["missing", "signed-out"],
-)
-def test_init_github_without_a_signed_in_gh_fails_preflight_before_creating_anything(
-    aa, machine, tmp_path, gh_on_path, failed
+def test_init_github_with_gh_signed_out_keeps_the_project_and_gives_the_gh_command_to_rerun(
+    aa_in, machine, tmp_path
 ):
-    machine = local_machine(machine)
-    if gh_on_path:
-        machine.add_gh(signed_in=False)
+    machine = github_machine(machine, signed_in=False)
 
-    result = aa("init", "demo", "--github", "--json", env=machine.env)
+    created = init(aa_in, tmp_path, machine, "--github")
 
-    assert result.exit_code == 1
-    envelope = json.loads(result.stdout)
-    assert envelope["error"]["code"] == "preflight_failed"
-    assert [check["id"] for check in envelope["data"]["checks"]] == failed
-    assert envelope["error"]["fix"]
-    assert list(tmp_path.iterdir()) == []
-    assert repo_creates(machine) == []
+    assert created.result.exit_code == 1
+    error = created.envelope["error"]
+    assert error["code"] == "step_failed"
+    assert "gh auth login" in error["message"]
+    assert error["fix"].startswith("gh repo create demo ")
+    assert created.git("log", "--format=%s").splitlines() == [COMMIT_MESSAGE]
+    assert created.git("status", "--porcelain") == ""
+
+
+def test_init_github_without_gh_keeps_the_project_and_reports_unexpected(aa_in, machine, tmp_path):
+    created = init(aa_in, tmp_path, local_machine(machine), "--github")
+
+    assert created.result.exit_code == 3
+    error = created.envelope["error"]
+    assert error["code"] == "unexpected"
+    assert "gh not found on PATH" in error["message"]
+    assert f"{created.project.resolve()} is kept" in error["message"]
+    assert created.git("log", "--format=%s").splitlines() == [COMMIT_MESSAGE]
 
 
 def test_a_failed_repo_creation_keeps_the_project_and_gives_the_gh_command_to_rerun(
@@ -586,6 +767,17 @@ def test_a_failed_repo_creation_keeps_the_project_and_gives_the_gh_command_to_re
     assert error["fix"].startswith("gh repo create demo ")
     assert "--source ." in error["fix"]
     assert str(created.project.resolve()) in error["message"]
+
+
+def test_a_failed_step_in_human_mode_shows_the_error_and_the_fix_on_stderr(aa, machine):
+    machine = github_machine(machine, repo_create_fails=True)
+
+    result = aa("init", "demo", "--github", env=machine.env)
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert "Name already exists" in result.stderr
+    assert "Fix: gh repo create demo " in result.stderr
 
 
 def test_a_failed_push_after_the_repo_was_created_gives_the_push_to_rerun(aa_in, machine, tmp_path):
