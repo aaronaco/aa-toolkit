@@ -210,6 +210,12 @@ class Machine:
         pairs = (("user.name", name), ("user.email", email))
         self._identity = {key: value for key, value in pairs if value is not None}
 
+    def ignore_globally(self, *patterns: str) -> None:
+        """Add ignore rules of the developer's own, through git's ``core.excludesFile``."""
+        ignore = self._gitconfig.with_name("global-ignore")
+        ignore.write_text("\n".join(patterns) + "\n")
+        self._gitconfig.write_text(f'[core]\n\texcludesFile = "{ignore.as_posix()}"\n')
+
     def _write_shim(self, name: str, command: list[str]) -> None:
         if os.name == "nt":
             quoted = " ".join(f'"{part}"' for part in command)

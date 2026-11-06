@@ -204,6 +204,17 @@ def test_init_stages_every_file_on_main_and_makes_no_commit(cli_project):
     assert cli_project.git("branch", "--show-current").strip() == "main"
 
 
+def test_init_stages_files_the_developers_own_git_ignore_rules_would_drop(aa_in, machine, tmp_path):
+    machine = local_machine(machine)
+    machine.ignore_globally("*.lock", ".python-version")
+
+    created = init(aa_in, tmp_path, machine)
+
+    assert created.result.exit_code == 0, created.result.output
+    assert set(created.git("diff", "--cached", "--name-only").splitlines()) == EXPECTED_FILES
+    assert set(created.envelope["data"]["files"]) == EXPECTED_FILES
+
+
 @pytest.mark.parametrize("kind", ["cli_project", "lib_project"])
 def test_the_created_project_passes_its_own_tests_lint_and_format_check(request, kind):
     assert_passes_its_own_tests_and_lint(request.getfixturevalue(kind).project)
@@ -397,9 +408,13 @@ def test_a_missing_tool_is_reported_as_unexpected_with_no_check_first(aa, machin
 
 
 def no_identity_env(machine) -> dict[str, str | None]:
-    """The machine's env, with git stopped from making up an identity from the user and host."""
+    """The machine's env, with git left no identity: none inherited, none made up from the host."""
     return {
         **machine.env,
+        "GIT_AUTHOR_NAME": None,
+        "GIT_AUTHOR_EMAIL": None,
+        "GIT_COMMITTER_NAME": None,
+        "GIT_COMMITTER_EMAIL": None,
         "GIT_CONFIG_COUNT": "1",
         "GIT_CONFIG_KEY_0": "user.useConfigOnly",
         "GIT_CONFIG_VALUE_0": "true",
@@ -611,6 +626,18 @@ def test_init_github_pushes_one_initial_commit_on_main_with_a_clean_tree(github_
     assert created.git("log", "--format=%s").splitlines() == [COMMIT_MESSAGE]
     assert created.git("branch", "--show-current").strip() == "main"
     assert created.git("status", "--porcelain") == ""
+
+
+def test_init_github_commits_files_the_developers_own_git_ignore_rules_would_drop(
+    aa_in, machine, tmp_path
+):
+    machine = github_machine(machine)
+    machine.ignore_globally("*.lock", ".python-version")
+
+    created = init(aa_in, tmp_path, machine, "--github")
+
+    assert created.result.exit_code == 0, created.result.output
+    assert set(created.git("ls-tree", "-r", "--name-only", "HEAD").splitlines()) == EXPECTED_FILES
 
 
 def test_init_github_public_creates_a_public_repo_and_shows_its_url(aa, machine):

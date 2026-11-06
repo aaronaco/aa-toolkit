@@ -164,7 +164,9 @@ def create_project(target: Path, kind: Kind, license_choice: License) -> list[st
         "pytest",
     )
     _write_files(target, kind, license_choice)
-    _step("stage files", target, "git", "add", "--all")
+    # The folder holds only what aa just made, so the project's .gitignore decides. A global
+    # rule like *.lock would drop a file the project's CI needs, and git add wouldn't say so.
+    _step("stage files", target, "git", "-c", "core.excludesFile=", "add", "--all")
     listed = _step("list files", target, "git", "ls-files")
     return sorted(listed.splitlines())
 
