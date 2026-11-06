@@ -242,6 +242,10 @@ def _write_files(target: Path, kind: Kind, license_choice: License) -> None:
         ".github/workflows/ci.yml": "ci.yml.tmpl",
     }
     if license_choice is License.MIT:
+        # Git can make up an author for the commit, but a blank holder would stay in the file.
+        if not values["holder"]:
+            detail = "the LICENSE needs a holder, but git's user.name is not set"
+            raise StepFailed("write files", detail, 'git config --global user.name "Your Name"')
         outputs["LICENSE"] = "LICENSE.tmpl"
     with _file_step("write files"):
         for path, template in outputs.items():

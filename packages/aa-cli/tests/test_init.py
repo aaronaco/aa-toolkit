@@ -400,13 +400,28 @@ def test_a_missing_git_identity_fails_the_initial_commit_with_gits_error(aa_in, 
         "GIT_CONFIG_VALUE_0": "true",
     }
 
-    result = aa_in(tmp_path, "init", "demo", "--json", env=no_identity)
+    result = aa_in(tmp_path, "init", "demo", "--license", "none", "--json", env=no_identity)
 
     assert result.exit_code == 1
     error = json.loads(result.stdout)["error"]
     assert error["code"] == "step_failed"
     assert "initial commit" in error["message"]
     assert "user.email" in error["message"]
+
+
+def test_a_license_without_a_git_name_is_step_failed_and_never_committed(aa_in, machine, tmp_path):
+    machine.add_real("uv")
+    machine.add_real("git")
+    machine.set_identity(name=None, email="ada@example.com")
+
+    created = init(aa_in, tmp_path, machine)
+
+    assert created.result.exit_code == 1
+    error = created.envelope["error"]
+    assert error["code"] == "step_failed"
+    assert "user.name" in error["message"]
+    assert error["fix"] == 'git config --global user.name "Your Name"'
+    assert not (created.project / "LICENSE").exists()
 
 
 def test_a_local_init_does_not_need_gh(cli_project):

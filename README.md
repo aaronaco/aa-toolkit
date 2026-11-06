@@ -32,7 +32,7 @@ aa --version
 
 `aa init <name>` creates a project in the folder `<name>`, which must be new or empty. It runs `uv init` (a CLI by default, a typed library with `--lib`), pins Python 3.15, adds ruff and pytest, and writes a starter test, AGENTS.md, CLAUDE.md, an MIT LICENSE (`--license none` skips it), a README, a .gitignore and a CI workflow for Windows and Linux. It ends with one commit, `chore: initial commit`, and leaves no aa config in the project.
 
-`aa init` assumes uv and git are installed and your git identity is set, and doesn't look for them first. A missing tool is reported as `unexpected`, and a missing identity fails the commit step with git's error.
+`aa init` assumes uv and git are installed and your git identity is set, and doesn't look for them first. A missing tool is reported as `unexpected`. A missing git name fails with `step_failed` when the project gets a LICENSE, because the name goes in it. Otherwise git decides: the commit step fails with git's error if git can't work out an identity on its own.
 
 With `--github`, `aa init` also creates a private GitHub repo with the project's name, pushes the first commit to it and prints its URL. Add `--public` to make the repo public. It assumes gh is installed and signed in. If creating the repo fails, for example because gh is signed out, the local project and its commit stay, and the fix is the `gh repo create` command to rerun from inside the project. If gh created the repo but the push failed, the fix is the `git push` instead.
 
