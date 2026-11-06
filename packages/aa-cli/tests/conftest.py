@@ -253,6 +253,15 @@ def aa_in():
     return run
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _no_ambient_git_repo():
+    """Keep a git hook that runs the suite from sending the tests' git commands to its repo."""
+    with pytest.MonkeyPatch.context() as patch:
+        for variable in ("GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE"):
+            patch.delenv(variable, raising=False)
+        yield
+
+
 @pytest.fixture(autouse=True)
 def _no_ambient_json(monkeypatch):
     """Keep a developer's own AA_JSON from leaking into tests that run aa as a subprocess."""
