@@ -34,8 +34,11 @@ jobs:
 
   sonar:
     name: SonarQube analysis
-    # Pull requests from forks can't read the token.
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    # Pull requests from forks and from Dependabot can't read the token.
+    if: >-
+      github.event_name == 'push' ||
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.user.login != 'dependabot[bot]')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
