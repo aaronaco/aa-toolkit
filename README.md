@@ -114,6 +114,8 @@ To run the online audits locally, set `GH_TOKEN` and run `uv run zizmor .`.
 gh extension install github/gh-actions-lock --pin v0.4.1
 ```
 
+The repo only runs actions created by GitHub or on its allow list, so add a new action to the allow list before its pull request runs. [ADR 0003](docs/adr/0003-allow-listed-actions-and-pinning.md) has the steps.
+
 After adding a workflow or changing a `uses:` line, relock and commit the workflow and the lockfile together:
 
 ```bash
