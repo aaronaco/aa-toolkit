@@ -6,7 +6,7 @@ import logging
 import os
 import re
 import sys
-from collections.abc import Iterator, Sequence
+from collections.abc import Generator, Sequence
 from importlib.metadata import version
 from pathlib import Path
 from typing import Annotated, Any
@@ -50,8 +50,8 @@ class AaGroup(TyperGroup):
         complete_var: str | None = None,
         standalone_mode: bool = True,
         windows_expand_args: bool = True,
-        **extra: Any,
-    ) -> Any:
+        **extra: Any,  # noqa: ANN401  # mirrors TyperGroup.main
+    ) -> Any:  # noqa: ANN401  # mirrors TyperGroup.main
         out = Output.from_args(sys.argv[1:] if args is None else args, os.environ)
         configure_logging(out.verbose)
         log.debug("aa %s on Python %s", version("aa-cli"), sys.version.split()[0])
@@ -78,7 +78,8 @@ class AaGroup(TyperGroup):
             code = _report_unexpected_error(out, exc)
         sys.exit(code if isinstance(code, int) else ExitCode.OK)
 
-    def invoke(self, ctx: typer.Context) -> Any:
+    # TyperGroup.invoke takes a Context type that Typer doesn't export; typer.Context subclasses it.
+    def invoke(self, ctx: typer.Context) -> Any:  # noqa: ANN401  # ty: ignore[invalid-method-override]
         # Typer turns KeyboardInterrupt into a bare exit 130 with nothing on
         # stdout; catch it first so it is reported like any other failure.
         try:
@@ -88,7 +89,7 @@ class AaGroup(TyperGroup):
 
 
 @contextlib.contextmanager
-def _help_as_envelope(out: Output) -> Iterator[None]:
+def _help_as_envelope(out: Output) -> Generator[None]:
     """In JSON mode, wrap the help text in a success envelope.
 
     Envelopes bypass the capture (see ``Output.stdout``), so only help text
@@ -117,7 +118,8 @@ def _report_usage_error(out: Output, exc: typer.TyperException) -> ExitCode:
     if out.json:
         out.failure("usage", exc.format_message(), fix=help_command)
     else:
-        exc.show()  # type: ignore[attr-defined]  # usage errors carry Click's show()
+        # Usage errors carry show(), but Typer exports no type that declares it.
+        exc.show()  # ty: ignore[unresolved-attribute]
     return ExitCode.USAGE
 
 
