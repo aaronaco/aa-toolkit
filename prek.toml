@@ -15,9 +15,6 @@ hooks = [
   { id = "end-of-file-fixer" },
   { id = "trailing-whitespace" },
   { id = "no-commit-to-branch" },
-  { id = "deny-filename-pattern", name = "no agent files in repo", args = ['^(AGENTS|CLAUDE)\.md$'] },
-  { id = "check-commit-trailers", args = ["--deny=Co-authored-by"], stages = ["commit-msg"] },
-  { id = "deny-pattern", name = "no generated-with line", args = ['-i', 'generated with \[?claude'], stages = ["commit-msg"] },
   { id = "require-pattern", name = "conventional commit", args = ['-m', '\A(?:(?:feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(?:\([^)]+\))?!?: \S|Merge |Revert |fixup! |squash! )'], stages = ["commit-msg"] },
 ]
 

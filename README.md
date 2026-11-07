@@ -76,7 +76,7 @@ The toolkit needs Python 3.14 or newer. Development uses the Python 3.15 pinned 
 
 ### Commit hooks
 
-[prek](https://github.com/j178/prek) runs hooks on every commit. CI runs the same hooks, except `no-commit-to-branch` and the ones that read the commit message. Install them once per machine:
+[prek](https://github.com/j178/prek) runs hooks on every commit. CI runs the same hooks, except `no-commit-to-branch` and the one that reads the commit message. Install them once per machine:
 
 ```bash
 uv tool install prek==0.5.10
@@ -96,7 +96,7 @@ uv run prek run --all-files
 
 On `main`, this reports `no-commit-to-branch` as failed, because commits there are refused.
 
-`uv.lock` pins the prek that CI uses. Dependabot doesn't cover uv here, so upgrade it by hand with `uv lock --upgrade-package prek`, and change the version in the install command above to match. After upgrading, recheck the commit-message hooks: `require-pattern` and `deny-pattern` work on commit messages, but prek's docs don't describe this use.
+`uv.lock` pins the prek that CI uses. Dependabot doesn't cover uv here, so upgrade it by hand with `uv lock --upgrade-package prek`, and change the version in the install command above to match. After upgrading, recheck the commit-message hook: `require-pattern` works on commit messages, but prek's docs don't describe this use.
 
 ## Output contract
 
