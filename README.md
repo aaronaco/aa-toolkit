@@ -76,7 +76,7 @@ The toolkit needs Python 3.14 or newer. Development uses the Python 3.15 pinned 
 
 ### Commit hooks
 
-[prek](https://github.com/j178/prek) runs hooks on every commit, and CI runs the same hooks. Install them once per machine:
+[prek](https://github.com/j178/prek) runs hooks on every commit. CI runs the same hooks, except `no-commit-to-branch` and the ones that read the commit message. Install them once per machine:
 
 ```bash
 uv tool install prek==0.5.10
