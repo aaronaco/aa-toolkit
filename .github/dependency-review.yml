@@ -1,0 +1,40 @@
+# Policy for the Dependency review workflow (actions/dependency-review-action).
+# It only checks what a pull request changes. Dependabot alerts and the weekly
+# uv audit cover packages that are already locked.
+
+# Fail on any severity. low is the default, set here on purpose.
+fail-on-severity: low
+
+# GitHub reports dev-group packages as runtime today. Listing every scope keeps
+# them covered if that changes.
+fail-on-scopes:
+  - runtime
+  - development
+  - unknown
+
+# The licenses in the dependency graph today. A package under any other license
+# fails the check, so adding it is a deliberate decision: add the SPDX ID here
+# in the same pull request. Packages with no detectable license only warn.
+# Don't switch to deny-licenses: v5 deprecates it.
+allow-licenses:
+  - MIT
+  - BSD-2-Clause
+  - BSD-3-Clause
+  - Apache-2.0
+  - ISC
+
+# Advisories to skip. Give each entry a comment saying why and until when, like:
+#   - GHSA-xxxx-xxxx-xxxx # not reachable from aa, until the fix ships in X 1.2
+allow-ghsas: []
+
+# Package URLs to block outright, like pkg:pypi/name.
+deny-packages: []
+
+# These only add information to the job summary.
+show-openssf-scorecard: true
+warn-on-openssf-scorecard-level: 3
+show-patched-versions: true
+
+# A PR comment needs pull-requests: write and can't be posted on fork PRs. The
+# job summary shows the same table.
+comment-summary-in-pr: never
