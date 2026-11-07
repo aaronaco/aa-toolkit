@@ -29,3 +29,14 @@ def test_the_glossary_defines_a_project_without_aa_config(package_dir):
     definition = glossary.split("**Project**:\n")[1].split("\n")[0]
     assert "aa init" in definition
     assert "config" not in definition
+
+
+def test_the_readme_installs_aa_from_the_cli_package_folder(package_dir):
+    readme = (package_dir.parents[1] / "README.md").read_text(encoding="utf-8")
+
+    installs = re.findall(r"^uv tool install .*--editable .*$", readme, flags=re.MULTILINE)
+    assert installs == [
+        "uv tool install --editable ./packages/aa-toolkit-cli",
+        "uv tool install --force --editable ./packages/aa-toolkit-cli",
+    ]
+    assert package_dir.name == "aa-toolkit-cli"
