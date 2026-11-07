@@ -3,7 +3,7 @@ name = "aa-toolkit"
 version = "0.0.0"
 description = "Workspace root of the aa toolkit."
 requires-python = ">=3.14"
-dependencies = ["aa-cli"]
+dependencies = ["aa-toolkit-cli"]
 
 [tool.uv]
 package = false
@@ -12,7 +12,7 @@ package = false
 members = ["packages/*"]
 
 [tool.uv.sources]
-aa-cli = { workspace = true }
+aa-toolkit-cli = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -25,7 +25,7 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["packages/aa-cli/tests"]
+testpaths = ["packages/aa-toolkit-cli/tests"]
 addopts = ["--import-mode=importlib"]
 
 [tool.coverage.run]

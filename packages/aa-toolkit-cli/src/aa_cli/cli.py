@@ -54,7 +54,7 @@ class AaGroup(TyperGroup):
     ) -> Any:  # noqa: ANN401  # mirrors TyperGroup.main
         out = Output.from_args(sys.argv[1:] if args is None else args, os.environ)
         configure_logging(out.verbose)
-        log.debug("aa %s on Python %s", version("aa-cli"), sys.version.split()[0])
+        log.debug("aa %s on Python %s", version("aa-toolkit-cli"), sys.version.split()[0])
         try:
             with _help_as_envelope(out):
                 code = super().main(
@@ -141,7 +141,7 @@ app = typer.Typer(cls=AaGroup, add_completion=False, pretty_exceptions_enable=Fa
 
 def _show_version(ctx: typer.Context, value: bool) -> None:
     if value:
-        current = version("aa-cli")
+        current = version("aa-toolkit-cli")
         ctx.obj.success({"version": current}, human=current)
         raise typer.Exit()
 
