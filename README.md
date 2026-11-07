@@ -74,6 +74,30 @@ ty is in beta and can change its diagnostics in any release, so `uv.lock` pins i
 
 The toolkit needs Python 3.14 or newer. Development uses the Python 3.15 pinned in `.python-version`.
 
+### Commit checks
+
+[prek](https://github.com/j178/prek) checks every commit, and CI runs the same checks. Install its hooks once per machine:
+
+```bash
+uv tool install prek==0.5.10
+```
+
+```bash
+prek install --allow-missing-config
+```
+
+Use the `uv tool` copy, not one in a venv. The installed hook stores the full path to the prek that installed it, and all worktrees share that hook, so deleting that venv would fail every commit in every worktree. `--allow-missing-config` keeps commits working on branches that have no `prek.toml` yet.
+
+Run the checks by hand:
+
+```bash
+uv run prek run --all-files
+```
+
+On `main`, this reports `no-commit-to-branch` as failed, because commits there are refused.
+
+`uv.lock` pins the prek that CI uses. Dependabot doesn't cover uv here, so upgrade it by hand with `uv lock --upgrade-package prek`, and change the version in the install command above to match. After upgrading, recheck the commit-message hooks: `require-pattern` and `deny-pattern` work on commit messages, but prek's docs don't describe this use.
+
 ## Output contract
 
 Every `aa` command follows the same rules, so scripts and AI agents can rely on them:
