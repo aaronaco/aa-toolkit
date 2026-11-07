@@ -123,3 +123,7 @@ Every `aa` command follows the same rules, so scripts and AI agents can rely on 
 | `usage` | `2` | Bad or conflicting flags, a missing argument, or an `aa init` name that breaks the name rule. Nothing was created. |
 | `aborted` | `130` | Ctrl+C stopped the command. When `aa init` had started writing, the message says the folder was left as it is. |
 | `unexpected` | `3` | An uncaught error, such as uv, git or gh missing from PATH. Rerun with `--verbose` for the traceback. |
+
+## Security
+
+To report a vulnerability, follow [SECURITY.md](SECURITY.md). It links to the private report form. Don't use a public issue.
