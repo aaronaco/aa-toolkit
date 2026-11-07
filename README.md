@@ -74,9 +74,9 @@ ty is in beta and can change its diagnostics in any release, so `uv.lock` pins i
 
 The toolkit needs Python 3.14 or newer. Development uses the Python 3.15 pinned in `.python-version`.
 
-### Commit checks
+### Commit hooks
 
-[prek](https://github.com/j178/prek) checks every commit, and CI runs the same checks. Install its hooks once per machine:
+[prek](https://github.com/j178/prek) runs hooks on every commit, and CI runs the same hooks. Install them once per machine:
 
 ```bash
 uv tool install prek==0.5.10
@@ -88,7 +88,7 @@ prek install --allow-missing-config
 
 Use the `uv tool` copy, not one in a venv. The installed hook stores the full path to the prek that installed it, and all worktrees share that hook, so deleting that venv would fail every commit in every worktree. `--allow-missing-config` keeps commits working on branches that have no `prek.toml` yet.
 
-Run the checks by hand:
+Run the hooks by hand:
 
 ```bash
 uv run prek run --all-files
