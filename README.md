@@ -147,7 +147,7 @@ GitHub doesn't list uv among the ecosystems its dependency graph supports, altho
 
 The `Scorecard` workflow scores the repo with [OpenSSF Scorecard](https://github.com/ossf/scorecard) on every push to `main`, every Monday and by hand. Scorecard rates repo-level practices, like branch protection, code review, the security policy and whether the project is maintained. Findings go to the Security tab, and the score goes to the public viewer the badge at the top links to. It runs on `main` only and doesn't block merges.
 
-Publishing the score makes the Scorecard API check the workflow before it accepts the results. So the workflow must keep no workflow-level `env`, `defaults` or write permissions, and its job may only use `actions/checkout`, `actions/upload-artifact`, `github/codeql-action/upload-sarif`, `ossf/scorecard-action` and `step-security/harden-runner`.
+Sending the score to the Scorecard API makes the API check the workflow before it accepts the results. So the workflow must keep no workflow-level `env`, `defaults` or write permissions, and its job may only use `actions/checkout`, `actions/upload-artifact`, `github/codeql-action/upload-sarif`, `ossf/scorecard-action` and `step-security/harden-runner`.
 
 It uses the default `GITHUB_TOKEN`. That token can read the `Protect main` ruleset, so the Branch-Protection check needs no personal access token.
 

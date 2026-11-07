@@ -1,7 +1,7 @@
-# Scores the repo with OpenSSF Scorecard, sends findings to the Security tab and
-# publishes the results behind the README badge. Publishing makes the Scorecard
-# API check this workflow: no workflow-level env, defaults or write permissions,
-# and only approved actions in the job.
+# Scores the repo with OpenSSF Scorecard. Findings go to the Security tab, and
+# the results go to the Scorecard API for the README badge. The API checks this
+# workflow before it accepts them: no workflow-level env, defaults or write
+# permissions, and only approved actions in the job.
 name: Scorecard
 
 on:
@@ -26,7 +26,7 @@ jobs:
     if: ${{ github.event.repository.default_branch == github.ref_name }}
     permissions:
       security-events: write
-      id-token: write # signs the results published to the Scorecard API
+      id-token: write # signs the results sent to the Scorecard API
     steps:
       - uses: actions/checkout@v7.0.1
         with:
