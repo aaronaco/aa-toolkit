@@ -1,0 +1,25 @@
+# Fails a pull request that adds a package with a known vulnerability, or under
+# a license that isn't allowed. The policy is in .github/dependency-review.yml.
+# No paths: filter, because a required check that a filter skips stays pending.
+name: Dependency review
+
+on:
+  pull_request:
+
+permissions: {}
+
+jobs:
+  dependency-review:
+    name: Dependency review
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      # The action reads the policy file from disk.
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/dependency-review-action@v5.0.0
+        with:
+          config-file: .github/dependency-review.yml

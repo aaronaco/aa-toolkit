@@ -128,6 +128,17 @@ gh actions-lock --verify
 
 Don't edit the lockfile by hand, and don't delete it to make an error go away. GitHub says Dependabot updates the lockfile in its own pull requests, but no Dependabot pull request here has shown it yet, so check the first one. Dependabot doesn't cover gh extensions, so upgrade the extension by hand: run `gh extension remove actions-lock`, install the new version, and change the `--pin` here and in `.github/workflows/actions-lock.yml` to match.
 
+### Dependency review
+
+The `Dependency review` workflow runs GitHub's [dependency-review-action](https://github.com/actions/dependency-review-action) on every pull request. It fails the pull request when it adds a uv package or a GitHub Action with a known vulnerability of any severity, or a package under a license that isn't allowed. It looks only at what the pull request changes: Dependabot alerts and the weekly `uv audit` cover packages already locked. Packages with no detectable license only warn.
+
+The policy is in `.github/dependency-review.yml`, not in the workflow. Change it in the same pull request that needs the change:
+
+- **Allow a new license:** add its SPDX ID, like `PSF-2.0`, to `allow-licenses`.
+- **Skip an advisory:** add its GHSA ID to `allow-ghsas`, with a comment saying why and until when.
+
+GitHub doesn't list uv among the ecosystems its dependency graph supports, although it reads `uv.lock` today. That's why the `uv audit` workflow still runs on pull requests that change `uv.lock`. Coverage of GitHub Actions is partial too: the graph reads the `uses:` lines but not `actions.lock`, so the `known-vulnerable-actions` audit in the `zizmor` workflow stays the check for vulnerable actions. That audit needs the network, so the offline hook skips it, and like the rest of that workflow it doesn't block merges.
+
 ## Output contract
 
 Every `aa` command follows the same rules, so scripts and AI agents can rely on them:
