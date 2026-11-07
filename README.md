@@ -126,7 +126,7 @@ Check the lockfile without changing anything:
 gh actions-lock --verify
 ```
 
-Don't edit the lockfile by hand, and don't delete it to make an error go away. Dependabot updates the lockfile in its own pull requests. Dependabot doesn't cover gh extensions, so upgrade the extension by hand: run `gh extension remove actions-lock`, install the new version, and change the `--pin` here and in `.github/workflows/actions-lock.yml` to match.
+Don't edit the lockfile by hand, and don't delete it to make an error go away. GitHub says Dependabot updates the lockfile in its own pull requests, but no Dependabot pull request here has shown it yet, so check the first one. Dependabot doesn't cover gh extensions, so upgrade the extension by hand: run `gh extension remove actions-lock`, install the new version, and change the `--pin` here and in `.github/workflows/actions-lock.yml` to match.
 
 ## Output contract
 
