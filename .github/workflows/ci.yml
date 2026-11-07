@@ -28,9 +28,12 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: uv python install
       - run: uv sync --locked
-      - run: uv run --locked ruff check .
-      - run: uv run --locked ruff format --check .
+      # Before prek, which also runs ty: a failed step skips the ones after it,
+      # and only this step gives the GitHub annotations.
       - run: uv run --locked ty check --output-format github
+      - run: uv run --locked prek run --all-files --show-diff-on-failure
+        env:
+          PREK_SKIP: no-commit-to-branch # it fails on pushes to main
       - run: uv run --locked pytest
 
   sonar:
