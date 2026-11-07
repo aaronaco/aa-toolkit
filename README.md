@@ -1,5 +1,7 @@
 # aa-toolkit
 
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/aaronaco/aa-toolkit/badge)](https://scorecard.dev/viewer/?uri=github.com/aaronaco/aa-toolkit)
+
 A personal developer toolkit: the `aa` command plus small libraries, developed together in one uv workspace.
 
 | Path | What it is |
@@ -140,6 +142,16 @@ The policy is in `.github/dependency-review.yml`, not in the workflow. Change it
 - **Skip an advisory:** add its GHSA ID to `allow-ghsas`, with a comment saying why and until when.
 
 GitHub doesn't list uv among the ecosystems its dependency graph supports, although it reads `uv.lock` today. That's why the `uv audit` workflow still runs on pull requests that change `uv.lock`. Coverage of GitHub Actions is partial too: the graph reads the `uses:` lines but not `actions.lock`, so the `known-vulnerable-actions` audit in the `zizmor` workflow stays the check for vulnerable actions. That audit needs the network, so the offline hook skips it, and like the rest of that workflow it doesn't block merges.
+
+### OpenSSF Scorecard
+
+The `Scorecard` workflow scores the repo with [OpenSSF Scorecard](https://github.com/ossf/scorecard) on every push to `main`, every Monday and by hand. Scorecard rates repo-level practices, like branch protection, code review, the security policy and whether the project is maintained. Findings go to the Security tab, and the score goes to the public viewer the badge at the top links to. It runs on `main` only and doesn't block merges.
+
+Sending the score to the Scorecard API makes the API check the workflow before it accepts the results. So the workflow must keep no workflow-level `env`, `defaults` or write permissions, and its job may only use `actions/checkout`, `actions/upload-artifact`, `github/codeql-action/upload-sarif`, `ossf/scorecard-action` and `step-security/harden-runner`.
+
+It uses the default `GITHUB_TOKEN`. That token can read the `Protect main` ruleset, so the Branch-Protection check needs no personal access token.
+
+Scorecard doesn't read `actions.lock`. A `uses:` line that names a tag counts as pinned only when the tag comes from an immutable release, so Pinned-Dependencies can report locked tag refs as unpinned. Dismiss those alerts as "False positive", with the lockfile as the reason, the same way Sonar's `githubactions:S7637` is ignored.
 
 ## Output contract
 

@@ -11,10 +11,10 @@ Settings → Actions → General. Read them with `gh api repos/aaronaco/aa-toolk
 | Allowed actions (`allowed_actions`) | `all` | `selected` |
 | Allow actions created by GitHub (`github_owned_allowed`) | not used | on |
 | Allow Marketplace actions by verified creators (`verified_allowed`) | not used | off |
-| Patterns (`patterns_allowed`) | not used | `astral-sh/setup-uv@*`, `SonarSource/sonarqube-scan-action@*`, `zizmorcore/zizmor-action@*` |
+| Patterns (`patterns_allowed`) | not used | `astral-sh/setup-uv@*`, `ossf/scorecard-action@*`, `SonarSource/sonarqube-scan-action@*`, `zizmorcore/zizmor-action@*` |
 | Require actions to be pinned to a full-length commit SHA (`sha_pinning_required`) | off | on |
 
-- "Created by GitHub" covers the `actions` and `github` organizations, so `github/codeql-action`, which zizmor-action calls, keeps working.
+- "Created by GitHub" covers the `actions` and `github` organizations, so `github/codeql-action`, which zizmor-action calls and the Scorecard workflow uses to upload its results, keeps working.
 - Verified creators stay off. GitHub calls the badge a signal, not a guarantee.
 - Patterns end in `@*`, not a tag. GitHub checks locked workflows against the locked commits, so a tag entry like `@v8` doesn't match.
 - Local actions (`uses: ./…`) and actions in repos owned by `aaronaco` are always allowed, so a pull request can add one without an allow-list entry. GitHub adds that rule itself.
@@ -30,7 +30,7 @@ gh api -X PUT repos/aaronaco/aa-toolkit/actions/permissions -F enabled=true -f a
 
 ```bash
 gh api -X PUT repos/aaronaco/aa-toolkit/actions/permissions/selected-actions --input - <<'EOF'
-{"github_owned_allowed": true, "verified_allowed": false, "patterns_allowed": ["astral-sh/setup-uv@*", "SonarSource/sonarqube-scan-action@*", "zizmorcore/zizmor-action@*"]}
+{"github_owned_allowed": true, "verified_allowed": false, "patterns_allowed": ["astral-sh/setup-uv@*", "ossf/scorecard-action@*", "SonarSource/sonarqube-scan-action@*", "zizmorcore/zizmor-action@*"]}
 EOF
 ```
 

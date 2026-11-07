@@ -1,0 +1,42 @@
+# Scores the repo with OpenSSF Scorecard. Findings go to the Security tab, and
+# the results go to the Scorecard API for the README badge. The API checks this
+# workflow before it accepts them: no workflow-level env, defaults or write
+# permissions, and only approved actions in the job.
+name: Scorecard
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "23 7 * * 1" # every Monday, keeps the Maintained check current
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+cache-mode: none
+
+jobs:
+  analysis:
+    name: Scorecard analysis
+    runs-on: ubuntu-latest
+    # Scorecard only supports the default branch.
+    if: ${{ github.event.repository.default_branch == github.ref_name }}
+    permissions:
+      security-events: write
+      id-token: write # signs the results sent to the Scorecard API
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ossf/scorecard-action@v2.5.0
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true
+      - if: ${{ always() }}
+        uses: github/codeql-action/upload-sarif@v4.39.1
+        with:
+          sarif_file: results.sarif
