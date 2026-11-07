@@ -1,0 +1,15 @@
+# Throwaway probe: docker/setup-qemu-action isn't on the repo's allow list,
+# so this job should fail at start. Never merge.
+name: allow-list probe
+
+on:
+  pull_request:
+
+permissions: {}
+
+jobs:
+  probe:
+    name: allow-list probe
+    runs-on: ubuntu-latest
+    steps:
+      - uses: docker/setup-qemu-action@v4.4.0
