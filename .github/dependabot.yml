@@ -1,0 +1,17 @@
+# uv isn't listed on purpose: Dependabot has open bugs affecting uv workspaces
+# like this one, so uv dependencies are updated by hand with `uv`.
+# https://github.com/dependabot/dependabot-core/issues/14004
+# https://github.com/dependabot/dependabot-core/issues/15786
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: ci(deps) # Dependabot adds the colon
+    groups:
+      github-actions:
+        patterns: ["*"]
