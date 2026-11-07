@@ -98,6 +98,14 @@ On `main`, this reports `no-commit-to-branch` as failed, because commits there a
 
 `uv.lock` pins the prek that CI uses. Dependabot doesn't cover uv here, so upgrade it by hand with `uv lock --upgrade-package prek`, and change the version in the install command above to match. After upgrading, recheck the commit-message hook: `require-pattern` works on commit messages, but prek's docs don't describe this use.
 
+### Workflow audit
+
+[zizmor](https://docs.zizmor.sh/) audits the GitHub Actions workflows and the Dependabot config. The `zizmor` hook runs it offline, and a finding stops a commit and a merge. The `zizmor` workflow also runs the online audits and sends results to the Security tab, but its findings don't block merges.
+
+`uv.lock` pins the zizmor that the hook uses. Upgrade it by hand with `uv lock --upgrade-package zizmor`. The workflow uses the zizmor that the action pins, and Dependabot upgrades the action.
+
+To run the online audits locally, set `GH_TOKEN` and run `uv run zizmor .`.
+
 ## Output contract
 
 Every `aa` command follows the same rules, so scripts and AI agents can rely on them:

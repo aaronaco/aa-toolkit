@@ -1,0 +1,26 @@
+# Adds online audits and Security tab alerts. It isn't the gate: with Advanced
+# Security on, the action exits 0 even with findings. The zizmor prek hook blocks
+# merges through the lint and test jobs.
+name: zizmor
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "47 6 * * 1" # every Monday, for new advisories against unchanged actions
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  zizmor:
+    name: zizmor
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: zizmorcore/zizmor-action@45d7276c9ca790aabd705e31ca99c6185c3e76dd # v0.8.1
