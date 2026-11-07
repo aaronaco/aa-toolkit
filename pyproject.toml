@@ -43,6 +43,9 @@ select = ["E", "F", "W", "I", "UP", "B", "ANN", "PYI"]
 [tool.ruff.lint.isort]
 known-first-party = ["aa_cli"]
 
+[tool.ty.analysis]
+respect-type-ignore-comments = false
+
 [tool.ty.rules]
 blanket-ignore-comment = "error"
 dynamic-function-decorator-return = "error"
