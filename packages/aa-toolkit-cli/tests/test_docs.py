@@ -1,6 +1,7 @@
 """The toolkit's docs: what they no longer describe."""
 
 import re
+import subprocess
 
 import pytest
 
@@ -40,3 +41,16 @@ def test_the_readme_installs_aa_from_the_cli_package_folder(package_dir):
         "uv tool install --force --editable ./packages/aa-toolkit-cli",
     ]
     assert package_dir.name == "aa-toolkit-cli"
+
+
+def test_the_repo_names_the_cli_package_only_by_its_new_name(package_dir):
+    # The bracket keeps this pattern from matching its own source line.
+    found = subprocess.run(
+        ["git", "grep", "-n", "-e", "aa[-]cli", "--", ".", ":!docs/research"],
+        cwd=package_dir.parents[1],
+        capture_output=True,
+        text=True,
+    )
+
+    assert found.stdout == ""
+    assert found.returncode == 1

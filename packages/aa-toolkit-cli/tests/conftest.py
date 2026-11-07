@@ -278,13 +278,13 @@ def aa(aa_in, tmp_path, monkeypatch):
 
 @pytest.fixture
 def package_dir() -> Path:
-    """The aa-cli package folder in this checkout."""
+    """The aa-toolkit-cli package folder in this checkout."""
     return PACKAGE_DIR
 
 
 @pytest.fixture
 def package_version() -> str:
-    """The version declared in the aa-cli pyproject."""
+    """The version declared in the aa-toolkit-cli pyproject."""
     pyproject = tomllib.loads((PACKAGE_DIR / "pyproject.toml").read_text())
     version: str = pyproject["project"]["version"]
     return version
