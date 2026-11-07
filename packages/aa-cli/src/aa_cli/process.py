@@ -27,7 +27,7 @@ def run(tool: str, *args: str, cwd: Path | None = None) -> subprocess.CompletedP
     if executable is None:
         raise FileNotFoundError(f"{tool} not found on PATH")
     log.debug("Running %s (%s)", command_line, executable)
-    result = subprocess.run(
+    result = subprocess.run(  # noqa: S603  # argument list, no shell, full tool path
         [executable, *args],
         cwd=cwd,
         env={key: value for key, value in os.environ.items() if key not in _REPO_VARIABLES},
