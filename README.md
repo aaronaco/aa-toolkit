@@ -137,7 +137,7 @@ The policy is in `.github/dependency-review.yml`, not in the workflow. Change it
 - **Allow a new license:** add its SPDX ID, like `PSF-2.0`, to `allow-licenses`.
 - **Skip an advisory:** add its GHSA ID to `allow-ghsas`, with a comment saying why and until when.
 
-GitHub doesn't list uv among the ecosystems its dependency graph supports, although it reads `uv.lock` today. That's why the `uv audit` workflow still runs on pull requests that change `uv.lock`. Coverage of GitHub Actions is partial too: the graph reads the `uses:` lines but not `actions.lock`, so the zizmor hook stays the check for vulnerable actions.
+GitHub doesn't list uv among the ecosystems its dependency graph supports, although it reads `uv.lock` today. That's why the `uv audit` workflow still runs on pull requests that change `uv.lock`. Coverage of GitHub Actions is partial too: the graph reads the `uses:` lines but not `actions.lock`, so the `known-vulnerable-actions` audit in the `zizmor` workflow stays the check for vulnerable actions. That audit needs the network, so the offline hook skips it, and like the rest of that workflow it doesn't block merges.
 
 ## Output contract
 
