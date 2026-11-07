@@ -8,6 +8,7 @@ import sys
 import threading
 import time
 import tomllib
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -234,7 +235,7 @@ def new_machine(tmp_path_factory):
 
 
 @pytest.fixture
-def machine(new_machine) -> Machine:
+def machine(new_machine: Callable[[], Machine]) -> Machine:
     """A stand-in machine with nothing on PATH yet. Pass ``machine.env`` to ``aa``."""
     return new_machine()
 
@@ -284,4 +285,6 @@ def package_dir() -> Path:
 @pytest.fixture
 def package_version() -> str:
     """The version declared in the aa-cli pyproject."""
-    return tomllib.loads((PACKAGE_DIR / "pyproject.toml").read_text())["project"]["version"]
+    pyproject = tomllib.loads((PACKAGE_DIR / "pyproject.toml").read_text())
+    version: str = pyproject["project"]["version"]
+    return version

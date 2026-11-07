@@ -19,6 +19,7 @@ dev = [
     "pytest>=9.2.0",
     "pytest-cov>=7.1.0",
     "ruff>=0.17.3",
+    "ty>=0.0.99",
 ]
 
 [tool.pytest.ini_options]
@@ -34,7 +35,20 @@ line-length = 100
 target-version = "py314"
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "UP", "B"]
+select = ["E", "F", "W", "I", "UP", "B", "ANN", "PYI"]
+
+[tool.ruff.lint.per-file-ignores]
+"packages/*/tests/**" = ["ANN"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["aa_cli"]
+
+[tool.ty.analysis]
+respect-type-ignore-comments = false
+
+[tool.ty.rules]
+blanket-ignore-comment = "error"
+dynamic-function-decorator-return = "error"
+missing-type-argument = "error"
+possibly-unresolved-reference = "warn"
+unsound-return-statement = "error"

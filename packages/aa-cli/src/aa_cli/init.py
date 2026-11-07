@@ -6,7 +6,7 @@ import keyword
 import logging
 import re
 import tomllib
-from collections.abc import Iterator
+from collections.abc import Generator
 from dataclasses import dataclass
 from enum import StrEnum
 from importlib.resources import files
@@ -115,7 +115,7 @@ def outer_workspace_taking_in(target: Path) -> OuterWorkspace | None:
     return None
 
 
-def _uv_workspace(pyproject: Path) -> dict | None:
+def _uv_workspace(pyproject: Path) -> dict[str, list[str]] | None:
     if not pyproject.is_file():
         return None
     try:
@@ -124,7 +124,10 @@ def _uv_workspace(pyproject: Path) -> dict | None:
         log.debug("Cannot read %s: %s", pyproject, exc)
         return None
     workspace = config.get("tool", {}).get("uv", {}).get("workspace")
-    return workspace if isinstance(workspace, dict) else None
+    if not isinstance(workspace, dict):
+        return None
+    table: dict[str, list[str]] = workspace  # uv's only workspace keys: members and exclude
+    return table
 
 
 def _matches(member: str, patterns: list[str]) -> bool:
@@ -133,7 +136,7 @@ def _matches(member: str, patterns: list[str]) -> bool:
 
 
 @contextlib.contextmanager
-def _rerun_note(target: Path) -> Iterator[None]:
+def _rerun_note(target: Path) -> Generator[None]:
     """Add to a failure what stops ``aa init`` from running again: what it left in ``target``."""
 
     def note() -> str:
@@ -238,7 +241,7 @@ def _step(step: str, cwd: Path, tool: str, *args: str, fix: str | None = None) -
 
 
 @contextlib.contextmanager
-def _file_step(step: str) -> Iterator[None]:
+def _file_step(step: str) -> Generator[None]:
     """Report a file read or write that fails as the failure of ``step``."""
     try:
         yield

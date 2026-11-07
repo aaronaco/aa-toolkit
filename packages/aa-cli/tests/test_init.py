@@ -8,8 +8,10 @@ import subprocess
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import pytest
+from typer.testing import Result
 
 COMMIT_MESSAGE = "chore: initial commit"
 EXPECTED_FILES = {
@@ -31,16 +33,16 @@ EXPECTED_FILES = {
 class Created:
     """What one ``aa init`` run left behind."""
 
-    result: object
+    result: Result
     project: Path
     git_env: dict[str, str]
 
     @property
-    def envelope(self) -> dict:
+    def envelope(self) -> Any:
         return json.loads(self.result.stdout)
 
     @property
-    def pyproject(self) -> dict:
+    def pyproject(self) -> dict[str, Any]:
         return tomllib.loads((self.project / "pyproject.toml").read_text(encoding="utf-8"))
 
     def read(self, path: str) -> str:
@@ -440,7 +442,7 @@ def test_a_missing_tool_before_anything_is_written_says_nothing_about_deleting(a
 
 def no_identity_env(machine) -> dict[str, str | None]:
     """The machine's env, with git left no identity: none inherited, none made up from the host."""
-    return {
+    env: dict[str, str | None] = {
         **machine.env,
         "GIT_AUTHOR_NAME": None,
         "GIT_AUTHOR_EMAIL": None,
@@ -450,6 +452,7 @@ def no_identity_env(machine) -> dict[str, str | None]:
         "GIT_CONFIG_KEY_0": "user.useConfigOnly",
         "GIT_CONFIG_VALUE_0": "true",
     }
+    return env
 
 
 def test_init_without_github_makes_no_commit_so_it_needs_no_git_identity(aa_in, machine, tmp_path):
@@ -647,7 +650,7 @@ def github_machine(machine, **gh_options):
     return machine
 
 
-def repo_creates(machine) -> list:
+def repo_creates(machine):
     return [call for call in machine.gh_calls() if call.args[:2] == ["repo", "create"]]
 
 

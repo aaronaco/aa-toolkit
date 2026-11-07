@@ -66,6 +66,12 @@ uv run ruff check .
 uv run ruff format .
 ```
 
+```bash
+uv run ty check
+```
+
+ty is in beta and can change its diagnostics in any release, so `uv.lock` pins its exact version. Upgrade it by hand with `uv lock --upgrade-package ty`.
+
 The toolkit needs Python 3.14 or newer. Development uses the Python 3.15 pinned in `.python-version`.
 
 ## Output contract
