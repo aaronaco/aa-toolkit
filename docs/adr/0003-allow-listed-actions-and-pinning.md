@@ -1,6 +1,6 @@
 # Allow only listed GitHub Actions and require pinned actions
 
-The toolkit's repo only runs GitHub Actions the owner has chosen. Before this, the repo allowed any action, so a pull request could bring in a new one and it ran. zizmor reports unpinned actions but can't stop a new one. With an allow list, a new action fails at job start until the owner adds it on purpose. Repo settings aren't in git, so this ADR records them. This applies to the toolkit's repo only: `aa init` and the projects it sets up don't change.
+The toolkit's repo only runs GitHub Actions the owner has chosen. Before this, the repo allowed any action, so a pull request could bring in a new one and it ran. zizmor reports unpinned actions but can't stop a new one. With an allow list, a new third-party action fails at job start until the owner adds it on purpose. Repo settings aren't in git, so this ADR records them. This applies to the toolkit's repo only: `aa init` and the projects it sets up don't change.
 
 ## Settings
 
@@ -17,8 +17,8 @@ Settings → Actions → General. Read them with `gh api repos/aaronaco/aa-toolk
 - "Created by GitHub" covers the `actions` and `github` organizations, so `github/codeql-action`, which zizmor-action calls, keeps working.
 - Verified creators stay off. GitHub calls the badge a signal, not a guarantee.
 - Patterns end in `@*`, not a tag. GitHub checks locked workflows against the locked commits, so a tag entry like `@v8` doesn't match.
-- Actions in repos owned by `aaronaco` are always allowed. GitHub adds that rule itself.
-- Pinning is a backstop. The Require lockfile policy already makes every workflow run locked commits, and GitHub counts a lockfile as pinned. If that Preview policy is turned off or changes, pinning still refuses a `uses:` line that names only a tag.
+- Local actions (`uses: ./…`) and actions in repos owned by `aaronaco` are always allowed, so a pull request can add one without an allow-list entry. GitHub adds that rule itself.
+- Pinning is a backstop. The Require lockfile policy already makes every workflow run locked commits, and GitHub counts a lockfile as pinned. If that Preview policy is turned off or changes, pinning still refuses a `uses:` line that names only a tag and has no lockfile entry.
 
 With pinning on, CodeQL default setup and every workflow on `main` still pass. The dependency graph update and Dependabot's GitHub Actions check hadn't run yet when this was written. If either fails because of pinning, turn pinning off, keep the allow list, and record here which one broke.
 
