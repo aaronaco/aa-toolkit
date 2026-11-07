@@ -106,6 +106,28 @@ On `main`, this reports `no-commit-to-branch` as failed, because commits there a
 
 To run the online audits locally, set `GH_TOKEN` and run `uv run zizmor .`.
 
+### Workflow lockfile
+
+`.github/workflows/actions.lock` records the exact commit of every action the workflows use, including actions those actions use. The `uses:` lines name version tags, and the lockfile holds the commits. The `actions-lock` workflow fails a pull request when the lockfile is out of date. Install the [gh-actions-lock](https://github.com/github/gh-actions-lock) extension at the version CI pins:
+
+```bash
+gh extension install github/gh-actions-lock --pin v0.4.1
+```
+
+After adding a workflow or changing a `uses:` line, relock and commit the workflow and the lockfile together:
+
+```bash
+gh actions-lock
+```
+
+Check the lockfile without changing anything:
+
+```bash
+gh actions-lock --verify
+```
+
+Don't edit the lockfile by hand, and don't delete it to make an error go away. GitHub says Dependabot updates the lockfile in its own pull requests, but no Dependabot pull request here has shown it yet, so check the first one. Dependabot doesn't cover gh extensions, so upgrade the extension by hand: run `gh extension remove actions-lock`, install the new version, and change the `--pin` here and in `.github/workflows/actions-lock.yml` to match.
+
 ## Output contract
 
 Every `aa` command follows the same rules, so scripts and AI agents can rely on them:
