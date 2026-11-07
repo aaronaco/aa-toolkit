@@ -6,22 +6,22 @@ A personal developer toolkit: the `aa` command plus small libraries, developed t
 
 | Path | What it is |
 |---|---|
-| `packages/aa-cli` | The `aa` command (import name `aa_cli`). |
+| `packages/aa-toolkit-cli` | The `aa` command (import name `aa_cli`). |
 
 ## Install `aa` from this checkout
 
 You need [uv](https://docs.astral.sh/uv/). From the repo root:
 
 ```bash
-uv tool install --editable ./packages/aa-cli
+uv tool install --editable ./packages/aa-toolkit-cli
 ```
 
-This puts `aa` on your PATH (run `uv tool update-shell` once if it isn't). The install is editable, so changes to the source under `packages/aa-cli/src` take effect the next time you run `aa`, with no reinstall.
+This puts `aa` on your PATH (run `uv tool update-shell` once if it isn't). The install is editable, so changes to the source under `packages/aa-toolkit-cli/src` take effect the next time you run `aa`, with no reinstall.
 
-Changes to `packages/aa-cli/pyproject.toml`, such as a new entry point or a new dependency, are not picked up by an editable install. After changing them, reinstall with `--force`:
+Changes to `packages/aa-toolkit-cli/pyproject.toml`, such as a new entry point or a new dependency, are not picked up by an editable install. After changing them, reinstall with `--force`:
 
 ```bash
-uv tool install --force --editable ./packages/aa-cli
+uv tool install --force --editable ./packages/aa-toolkit-cli
 ```
 
 Check it works:

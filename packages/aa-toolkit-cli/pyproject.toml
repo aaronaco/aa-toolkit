@@ -1,5 +1,5 @@
 [project]
-name = "aa-cli"
+name = "aa-toolkit-cli"
 version = "0.1.0"
 description = "The aa command."
 readme = "README.md"
@@ -14,3 +14,6 @@ aa = "aa_cli.cli:main"
 [build-system]
 requires = ["uv_build>=0.13.7,<0.14"]
 build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "aa_cli"

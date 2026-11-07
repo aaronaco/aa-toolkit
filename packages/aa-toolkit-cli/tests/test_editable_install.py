@@ -10,7 +10,7 @@ def test_editable_tool_install_runs_aa_and_picks_up_source_edits(
     tmp_path, package_dir, package_version
 ):
     # Install a copy, so editing the source below never touches the checkout.
-    source = tmp_path / "aa-cli"
+    source = tmp_path / "aa-toolkit-cli"
     shutil.copytree(package_dir, source, ignore=shutil.ignore_patterns("tests", "__pycache__"))
     bin_dir = tmp_path / "bin"
     env = {**os.environ, "UV_TOOL_DIR": str(tmp_path / "tools"), "UV_TOOL_BIN_DIR": str(bin_dir)}
