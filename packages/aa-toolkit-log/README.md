@@ -60,13 +60,13 @@ A variable that is set wins over the matching argument. An empty one counts as n
 | `AA_LOG_FORMAT` | `text`, `json` | Forces the style on screen. Without it, a terminal gets `text` and anything else gets `json`. |
 | `AA_LOG_FILE` | a path | Saves logs to that file. |
 
-A bad value gives a warning on stderr and the default is used. A log file that can't be opened gives a warning and logs stay on screen. Neither stops the app.
+A bad `AA_LOG_LEVEL` gives a warning and the `level` argument is used, which is `INFO` unless the app passes another level. A bad `AA_LOG_FORMAT` gives a warning and the style is chosen as if it weren't set. A log file that can't be opened gives a warning and logs stay on screen. Neither stops the app.
 
 ## Saving to a file
 
 The file always holds JSON lines in UTF-8, with the same messages as the screen. Its folder is created when it's missing. At 10 MB a new file starts and the last 3 old ones are kept. Only one copy of an app should write to a log file at a time: on Windows, starting a new file can fail when two copies share one, and some lines can be lost.
 
-Add `*.log` to your `.gitignore`, so a log file isn't committed by accident.
+Add `*.log` and `*.log.[1-3]` to your `.gitignore`, so a log file and its old copies aren't committed by accident.
 
 ## Logs don't hide secrets
 

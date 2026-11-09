@@ -1,6 +1,8 @@
 """What the docs tell a developer about the log library."""
 
 import logging
+import re
+import subprocess
 
 import pytest
 
@@ -69,3 +71,20 @@ def test_the_glossary_defines_log_library(glossary):
 
     assert "The library that gives an app a ready-made logging setup." in definition
     assert "_Avoid_: log engine, logger (when you mean the library)" in definition
+
+
+def test_the_ignore_rules_in_the_readme_cover_a_log_file_and_its_old_copies(readme, tmp_path):
+    rules = re.findall(r"`(\*\.log[^`]*)`", readme)
+    (tmp_path / ".gitignore").write_text("\n".join(rules) + "\n")
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    names = ["app.log", "app.log.1", "app.log.2", "app.log.3"]
+
+    done = subprocess.run(
+        ["git", "check-ignore", "--no-index", *names], cwd=tmp_path, capture_output=True, text=True
+    )
+
+    assert done.stdout.split() == names
+
+
+def test_the_readme_says_a_bad_level_falls_back_to_the_level_argument(readme):
+    assert "A bad `AA_LOG_LEVEL` gives a warning and the `level` argument is used" in readme

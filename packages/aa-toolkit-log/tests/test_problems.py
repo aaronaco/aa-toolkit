@@ -179,3 +179,16 @@ def test_a_terminal_stream_without_a_file_number_keeps_the_app_running(monkeypat
     monkeypatch.setattr(sys, "stderr", Bare())
 
     configure_logging()
+
+
+def test_a_line_break_in_a_bad_log_file_path_cannot_add_a_line_to_the_logs(
+    piped, tmp_path, monkeypatch
+):
+    blocker = tmp_path / "a_file"
+    blocker.write_text("")
+    monkeypatch.setenv("AA_LOG_FORMAT", "text")
+    monkeypatch.setenv("AA_LOG_FILE", str(blocker / "x\nERROR  forged" / "app.log"))
+
+    configure_logging()
+
+    assert len(piped.getvalue().splitlines()) == 1

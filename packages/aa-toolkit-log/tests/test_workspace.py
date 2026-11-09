@@ -47,9 +47,11 @@ def test_ci_runs_a_small_app_with_only_the_log_library_installed(repo, ci):
     commands = [
         line.strip().removeprefix("- run: ")
         for line in ci.splitlines()
-        if "--no-project --with ./packages/aa-toolkit-log" in line
+        if "--package aa-toolkit-log" in line
     ]
     assert len(commands) == 1
+    assert "--locked" in commands[0]
+    assert "--isolated" in commands[0]
     uv, *args = shlex.split(commands[0])
 
     done = subprocess.run(

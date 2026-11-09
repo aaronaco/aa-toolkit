@@ -147,4 +147,4 @@ def configure_logging(
     setup_log.setLevel(logging.WARNING)
     with contextlib.suppress(ValueError):
         for problem in problems:
-            setup_log.warning(problem)
+            setup_log.warning(problem.replace("\r", " ").replace("\n", " "))
