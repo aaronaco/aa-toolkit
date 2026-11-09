@@ -1,5 +1,8 @@
 """Problems while setting up logging: reported on stderr, and never a crash."""
 
+import builtins
+import errno
+import io
 import json
 import sys
 
@@ -192,3 +195,20 @@ def test_a_line_break_in_a_bad_log_file_path_cannot_add_a_line_to_the_logs(
     configure_logging()
 
     assert len(piped.getvalue().splitlines()) == 1
+
+
+def test_a_log_file_that_fails_to_close_warns_and_logs_stay_on_screen(piped, tmp_path, monkeypatch):
+    class FullDisk(io.StringIO):
+        def flush(self):
+            raise OSError(errno.ENOSPC, "No space left on device")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(builtins, "open", lambda *args, **kwargs: FullDisk())
+        configure_logging(file=tmp_path / "app.log")
+
+    configure_logging()
+    get_logger("my_app").info("shown")
+
+    last_two = piped.getvalue().splitlines()[-2:]
+    assert "No space left on device" in json.loads(last_two[0])["message"]
+    assert json.loads(last_two[1])["message"] == "shown"

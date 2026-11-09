@@ -125,12 +125,15 @@ def configure_logging(
     with any setting is reported as a warning and never stops the app.
     """
     root = logging.getLogger()
+    problems: list[str] = []
     for handler in _installed:
         root.removeHandler(handler)
-        handler.close()
+        try:
+            handler.close()
+        except (OSError, ValueError) as error:
+            problems.append(f"could not close the earlier log file: {error}")
     _installed.clear()
 
-    problems: list[str] = []
     screen = logging.StreamHandler(sys.stderr)
     screen.setFormatter(_screen_formatter(sys.stderr, problems))
     _attach(screen)

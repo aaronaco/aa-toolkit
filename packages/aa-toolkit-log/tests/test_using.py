@@ -29,14 +29,14 @@ def test_get_logger_returns_a_standard_python_logger():
 
 def test_a_file_that_only_calls_get_logger_does_not_turn_logging_on():
     # In a new process, because pytest attaches handlers of its own to the root logger.
-    program = (
+    app = (
         "from aa_log import get_logger\n"
         "log = get_logger('my_app')\n"
         "log.info('hidden')\n"
         "log.warning('python default')\n"
     )
 
-    done = subprocess.run([sys.executable, "-c", program], capture_output=True, text=True)
+    done = subprocess.run([sys.executable, "-c", app], capture_output=True, text=True)
 
     assert done.stderr == "python default\n"
     assert done.stdout == ""

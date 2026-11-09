@@ -9,4 +9,4 @@ The toolkit lives in one uv workspace (one repo, one lockfile) instead of one re
 
 ## Consequences
 
-All workspace members share one `.venv`, so an undeclared sibling import still works locally. CI must install each library in isolation, and an import-linter independence contract must forbid cross-imports.
+All workspace members share one `.venv`, so an undeclared sibling import still works locally. CI must install each library in isolation, and an import-linter independence contract must forbid cross-imports. With one library there is nothing for the contract to compare, so it arrives with the second library.
