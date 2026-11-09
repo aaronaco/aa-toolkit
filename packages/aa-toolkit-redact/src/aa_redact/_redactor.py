@@ -8,24 +8,31 @@ from aa_redact._finding import Detector, Finding
 
 def _find(text: str, detectors: Iterable[Detector]) -> list[Finding]:
     """Return what the Detectors found, in text order, with overlaps merged into one Finding."""
-    found = [
-        (finding, order) for order, detector in enumerate(detectors) for finding in detector(text)
-    ]
-    for finding, _ in found:
-        if not 0 <= finding.start < finding.end <= len(text):
-            raise ValueError(f"a Detector returned a Finding that doesn't fit the text: {finding}")
+    found: list[tuple[Finding, int]] = []
+    for detector_order, detector in enumerate(detectors):
+        for finding in detector(text):
+            if not 0 <= finding.start < finding.end <= len(text):
+                raise ValueError(
+                    f"a Detector returned a Finding that doesn't fit the text: {finding}"
+                )
+            found.append((finding, detector_order))
+    return _merge(found)
+
+
+def _merge(found: list[tuple[Finding, int]]) -> list[Finding]:
+    """Merge overlapping Findings. The longest names the kind, then the earlier Detector."""
     merged: list[Finding] = []
-    best = (0, 0)  # the rank of the Finding that names the last merged one
-    for finding, order in sorted(found, key=lambda item: item[0].start):
-        rank = (finding.end - finding.start, -order)  # the longest wins, then the earlier Detector
+    naming_rank = (0, 0)  # the rank of the Finding that gave the last merged one its kind
+    for finding, detector_order in sorted(found, key=lambda pair: pair[0].start):
+        rank = (finding.end - finding.start, -detector_order)
         if merged and finding.start < merged[-1].end:
             last = merged[-1]
-            kind = finding.kind if rank > best else last.kind
+            kind = finding.kind if rank > naming_rank else last.kind
             merged[-1] = Finding(kind, last.start, max(last.end, finding.end))
-            best = max(best, rank)
+            naming_rank = max(naming_rank, rank)
         else:
             merged.append(finding)
-            best = rank
+            naming_rank = rank
     return merged
 
 
