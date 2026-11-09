@@ -7,6 +7,7 @@ A personal developer toolkit: the `aa` command plus small libraries, developed t
 | Path | What it is |
 |---|---|
 | `packages/aa-toolkit-cli` | The `aa` command (import name `aa_cli`). |
+| `packages/aa-toolkit-log` | The log library (import name `aa_log`). See [its README](packages/aa-toolkit-log/README.md). |
 
 ## Install `aa` from this checkout
 

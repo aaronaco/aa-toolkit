@@ -3,7 +3,7 @@ name = "aa-toolkit"
 version = "0.0.0"
 description = "Workspace root of the aa toolkit."
 requires-python = ">=3.14"
-dependencies = ["aa-toolkit-cli"]
+dependencies = ["aa-toolkit-cli", "aa-toolkit-log"]
 
 [tool.uv]
 package = false
@@ -13,6 +13,7 @@ members = ["packages/*"]
 
 [tool.uv.sources]
 aa-toolkit-cli = { workspace = true }
+aa-toolkit-log = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -25,7 +26,7 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["packages/aa-toolkit-cli/tests"]
+testpaths = ["packages/aa-toolkit-cli/tests", "packages/aa-toolkit-log/tests"]
 addopts = ["--import-mode=importlib"]
 
 [tool.coverage.run]
@@ -43,7 +44,7 @@ select = ["E", "F", "W", "I", "UP", "B", "ANN", "PYI", "S"]
 "packages/*/tests/**" = ["ANN", "S101", "S603", "S607"]  # tests assert and run git and uv by name
 
 [tool.ruff.lint.isort]
-known-first-party = ["aa_cli"]
+known-first-party = ["aa_cli", "aa_log"]
 
 [tool.ty.analysis]
 respect-type-ignore-comments = false
