@@ -12,6 +12,14 @@ _Avoid_: monorepo, framework
 An aa package that can be installed and used on its own, without the CLI or any other aa library.
 _Avoid_: engine, module, core
 
+**Log library**:
+The library that gives an app a ready-made logging setup.
+_Avoid_: log engine, logger (when you mean the library)
+
+**App**:
+A program someone runs, as opposed to a library that other code imports. An app decides how its logs look and where they go.
+_Avoid_: program, service
+
 **Project**:
 A repo that `aa init` set up.
 _Avoid_: repo (when you mean a project), workspace
