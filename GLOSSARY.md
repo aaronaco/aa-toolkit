@@ -16,6 +16,26 @@ _Avoid_: engine, module, core
 The library that gives an app a ready-made logging setup.
 _Avoid_: log engine, logger (when you mean the library)
 
+**Redaction library**:
+The library that takes sensitive values out of text and data before they leave an app.
+_Avoid_: anonymizer, scrubber, sanitizer
+
+**Detector**:
+The part of the redaction library that finds one kind of sensitive value in text. It can be built in or added by an app.
+_Avoid_: recognizer, scanner, adapter
+
+**Sensitive name**:
+A field name whose value is always redacted, whatever the value looks like.
+_Avoid_: blocklist, mask key
+
+**Known value**:
+A sensitive value an app already holds and asks to have redacted wherever it appears.
+_Avoid_: deny list
+
+**Placeholder**:
+The text left where a redacted value used to be, naming only what kind of value it was, such as `[EMAIL]`.
+_Avoid_: mask, token
+
 **App**:
 A program someone runs, as opposed to a library that other code imports. An app decides how its logs look and where they go.
 _Avoid_: program, service

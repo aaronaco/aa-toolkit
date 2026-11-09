@@ -8,6 +8,7 @@ A personal developer toolkit: the `aa` command plus small libraries, developed t
 |---|---|
 | `packages/aa-toolkit-cli` | The `aa` command (import name `aa_cli`). |
 | `packages/aa-toolkit-log` | The log library (import name `aa_log`). See [its README](packages/aa-toolkit-log/README.md). |
+| `packages/aa-toolkit-redact` | The redaction library (import name `aa_redact`). See [its README](packages/aa-toolkit-redact/README.md). |
 
 ## Install `aa` from this checkout
 
@@ -72,6 +73,12 @@ uv run ruff format .
 ```bash
 uv run ty check
 ```
+
+```bash
+uv run lint-imports
+```
+
+`lint-imports` fails when one library imports another, as [ADR 0001](docs/adr/0001-single-workspace-independent-libraries.md) requires. It also runs as a commit hook.
 
 ty is in beta and can change its diagnostics in any release, so `uv.lock` pins its exact version. Upgrade it by hand with `uv lock --upgrade-package ty`.
 
