@@ -29,6 +29,8 @@ def fill(piece: str) -> str:
         fill("a" * 64 + "@"),
         fill("a" * 64 + "@" + ("b" * 63 + ".") * 8),
         fill("é"),
+        fill("a" * 64 + "@" + "a." * 126),
+        fill("a" * 64 + "@" + ("b" * 63 + ".") * 126),
         "a@a.xn--" + fill("-"),
         fill("a@a.xn--"),
         fill("a@a.xn-"),

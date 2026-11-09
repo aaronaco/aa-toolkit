@@ -44,6 +44,8 @@ class Redactor:
     __slots__ = ("_detectors",)
 
     def __init__(self, *, detectors: Iterable[Detector] = (), without: Iterable[str] = ()) -> None:
+        if isinstance(without, str):
+            raise TypeError(f"without= takes a list of kinds, like without=[{without!r}]")
         off = set(without)
         built_in = (detector for kind, detector in BUILT_IN.items() if kind not in off)
         self._detectors = (*built_in, *detectors)

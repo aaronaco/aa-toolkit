@@ -29,6 +29,8 @@ def test_an_email_is_replaced_and_the_rest_of_the_text_is_unchanged():
         ("josé@example.com", "[EMAIL]"),
         ("bob@münchen.de", "[EMAIL]"),
         ("bob@example.xn--p1ai", "[EMAIL]"),
+        ("bob@aa.bb.cc.dd.ee.ff.gg.hh.ii.company.com", "[EMAIL]"),
+        ("bob@" + "a." * 125 + "com.", "[EMAIL]."),
         ("bob@xn--mnchen-3ya.XN--P1AI.", "[EMAIL]."),
     ],
 )

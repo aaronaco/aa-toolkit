@@ -32,7 +32,7 @@ order 4521 for [EMAIL]
 
 A `Redactor` doesn't change after it's created, so every thread can share one.
 
-This version has one built-in Detector, `EMAIL`.
+This version has one built-in Detector, `EMAIL`. It reads at most 64 characters before the `@`, so a longer address keeps its first characters.
 
 ## Add your own Detector
 
@@ -82,7 +82,7 @@ When Findings overlap, they become one Placeholder. The longest Finding gives th
 
 ## Turn off a built-in Detector
 
-Pass the kind in `without=`. Every other Detector still runs, and so do the ones you added.
+Pass a list of kinds in `without=`. Every other Detector still runs, and so do the ones you added.
 
 ```python
 from aa_redact import Redactor

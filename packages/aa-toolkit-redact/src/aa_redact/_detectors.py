@@ -19,6 +19,6 @@ def pattern(kind: str, regex: str) -> Detector:
 BUILT_IN: dict[str, Detector] = {
     "EMAIL": pattern(
         "EMAIL",
-        r"[\w.%+-]{1,64}@(?:[\w-]{1,63}\.){1,8}(?:[xX][nN]--[A-Za-z0-9-]{1,59}|[^\W\d_]{2,24})",
+        r"[\w.%+-]{1,64}@(?:[\w-]{1,63}\.){1,126}(?:[xX][nN]--[A-Za-z0-9-]{1,59}|[^\W\d_]{2,24})",
     ),
 }

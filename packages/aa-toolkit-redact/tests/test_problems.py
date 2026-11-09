@@ -43,6 +43,11 @@ def test_a_finding_that_does_not_fit_the_text_raises_and_names_the_kind(span):
         redact("abc")
 
 
+def test_without_given_one_kind_as_text_and_not_a_list_raises_when_the_redactor_is_made():
+    with pytest.raises(TypeError, match="without"):
+        Redactor(without="EMAIL")
+
+
 def test_a_pattern_that_can_match_nothing_finds_only_real_matches():
     redact = Redactor(detectors=[pattern("DIGITS", r"\d*")])
 
