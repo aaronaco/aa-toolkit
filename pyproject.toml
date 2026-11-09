@@ -18,6 +18,7 @@ aa-toolkit-redact = { workspace = true }
 
 [dependency-groups]
 dev = [
+    "import-linter>=2.16",
     "prek>=0.5.10",
     "pytest>=9.2.0",
     "pytest-cov>=7.1.0",
@@ -27,7 +28,11 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["packages/aa-toolkit-cli/tests", "packages/aa-toolkit-log/tests"]
+testpaths = [
+    "packages/aa-toolkit-cli/tests",
+    "packages/aa-toolkit-log/tests",
+    "packages/aa-toolkit-redact/tests",
+]
 addopts = ["--import-mode=importlib"]
 
 [tool.coverage.run]
@@ -46,6 +51,15 @@ select = ["E", "F", "W", "I", "UP", "B", "ANN", "PYI", "S"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["aa_cli", "aa_log", "aa_redact"]
+
+# ADR 0001: a library never imports another library. The CLI may import them, so it isn't listed.
+[tool.importlinter]
+root_packages = ["aa_log", "aa_redact"]
+
+[[tool.importlinter.contracts]]
+name = "Libraries don't import each other"
+type = "independence"
+modules = ["aa_log", "aa_redact"]
 
 [tool.ty.analysis]
 respect-type-ignore-comments = false

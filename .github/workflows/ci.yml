@@ -52,6 +52,20 @@ jobs:
       # Not uv sync: all workspace members share one .venv, where an undeclared import still works.
       - run: uv run --locked --isolated --no-default-groups --package aa-toolkit-log python -I packages/aa-toolkit-log/tests/alone_app.py
 
+  redact-library-alone:
+    name: Redact library alone
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          version: "0.13.7"
+      - run: uv python install
+      # Not uv sync, for the same reason as the log library's check.
+      - run: uv run --locked --isolated --no-default-groups --package aa-toolkit-redact python -I packages/aa-toolkit-redact/tests/alone_app.py
+
   sonar:
     name: SonarQube analysis
     # Pull requests from forks and from Dependabot can't read the token.
@@ -70,7 +84,7 @@ jobs:
           version: "0.13.7"
       - run: uv python install
       - run: uv sync --locked
-      - run: uv run --locked pytest --cov=aa_cli --cov=aa_log --cov-report=xml
+      - run: uv run --locked pytest --cov=aa_cli --cov=aa_log --cov=aa_redact --cov-report=xml
       - uses: SonarSource/sonarqube-scan-action@v8.4.1
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

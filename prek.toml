@@ -25,6 +25,7 @@ hooks = [
   { id = "ruff-check", name = "ruff check", language = "system", entry = "uv run --locked ruff check --fix --force-exclude", types_or = ["python", "pyi"], require_serial = true },
   { id = "ruff-format", name = "ruff format", language = "system", entry = "uv run --locked ruff format --force-exclude", types_or = ["python", "pyi"], require_serial = true },
   { id = "ty", name = "ty check", language = "system", entry = "uv run --locked ty check", pass_filenames = false, types_or = ["python", "pyi"] },
+  { id = "import-linter", name = "import contract", language = "system", entry = "uv run --locked lint-imports", pass_filenames = false, types_or = ["python", "pyi"] },
   # Without --strict-collection, a file zizmor can't parse is skipped and the hook can still pass.
   { id = "zizmor", name = "zizmor", language = "system", entry = "uv run --locked zizmor --offline --no-progress --strict-collection", files = '(^|/)\.github/(workflows/[^/]+|dependabot)\.ya?ml$', require_serial = true },
 ]

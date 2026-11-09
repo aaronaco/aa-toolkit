@@ -34,7 +34,7 @@ def test_the_type_check_is_not_limited_to_some_packages(repo):
 
 
 def test_coverage_includes_the_log_library(ci):
-    assert "pytest --cov=aa_cli --cov=aa_log --cov-report=xml" in ci
+    assert "pytest --cov=aa_cli --cov=aa_log --cov=aa_redact --cov-report=xml" in ci
 
 
 def test_the_analysis_includes_the_log_library(repo):
