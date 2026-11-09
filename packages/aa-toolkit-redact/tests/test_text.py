@@ -28,6 +28,8 @@ def test_an_email_is_replaced_and_the_rest_of_the_text_is_unchanged():
         ("from a@example.com to b@example.com", "from [EMAIL] to [EMAIL]"),
         ("josé@example.com", "[EMAIL]"),
         ("bob@münchen.de", "[EMAIL]"),
+        ("bob@example.xn--p1ai", "[EMAIL]"),
+        ("bob@xn--mnchen-3ya.XN--P1AI.", "[EMAIL]."),
     ],
 )
 def test_an_email_is_found(text, cleaned):

@@ -17,5 +17,8 @@ def pattern(kind: str, regex: str) -> Detector:
 
 # Every repeat is bounded, so text written to be slow can't stall the app.
 BUILT_IN: dict[str, Detector] = {
-    "EMAIL": pattern("EMAIL", r"[\w.%+-]{1,64}@(?:[\w-]{1,63}\.){1,8}[^\W\d_]{2,24}"),
+    "EMAIL": pattern(
+        "EMAIL",
+        r"[\w.%+-]{1,64}@(?:[\w-]{1,63}\.){1,8}(?:[xX][nN]--[A-Za-z0-9-]{1,59}|[^\W\d_]{2,24})",
+    ),
 }
