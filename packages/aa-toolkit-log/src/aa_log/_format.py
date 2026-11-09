@@ -2,6 +2,7 @@
 
 import json
 import logging
+from datetime import datetime
 
 _LABELS = {
     logging.DEBUG: "DEBUG",
@@ -26,6 +27,23 @@ def _label(record: logging.LogRecord) -> str:
 
 def _extra(record: logging.LogRecord) -> dict[str, object]:
     return {key: value for key, value in vars(record).items() if key not in _STANDARD_FIELDS}
+
+
+def _text(value: object) -> str:
+    """Turn a value into text, even one whose own ``__str__`` fails."""
+    try:
+        return str(value)
+    except Exception:
+        return f"<unprintable {type(value).__name__}>"
+
+
+def _json_value(value: object) -> object:
+    """Keep a value JSON can hold, and turn any other into text."""
+    try:
+        json.dumps(value, default=str, allow_nan=False)
+    except Exception:
+        return _text(value)
+    return value
 
 
 class _Formatter(logging.Formatter):
@@ -56,7 +74,7 @@ class TextFormatter(_Formatter):
         return f"{label}{padding}"
 
     def format(self, record: logging.LogRecord) -> str:
-        pairs = [f"{key}={value}" for key, value in _extra(record).items()]
+        pairs = [f"{key}={_text(value)}" for key, value in _extra(record).items()]
         text = " ".join([record.getMessage(), *pairs])
         time = self.formatTime(record, "%H:%M:%S")
         line = f"{time}  {self._level(record)}  {record.name:<{_LOGGER_WIDTH}}  {text}"
@@ -68,9 +86,16 @@ class JsonFormatter(_Formatter):
     """One complete JSON object per record, on one line."""
 
     def format(self, record: logging.LogRecord) -> str:
-        payload = {
+        when = datetime.fromtimestamp(record.created).astimezone()
+        payload: dict[str, object] = {
+            "time": when.isoformat(timespec="milliseconds"),
             "level": _label(record).lower(),
             "logger": record.name,
             "message": record.getMessage(),
         }
-        return json.dumps(payload, ensure_ascii=False)
+        details = self._details(record)
+        if details:
+            payload["exception"] = details
+        for key, value in _extra(record).items():
+            payload.setdefault(key, _json_value(value))
+        return json.dumps(payload, ensure_ascii=False, default=_text)

@@ -121,3 +121,15 @@ def test_error_details_appear_below_the_line_that_reported_them(piped):
     assert first.endswith("it failed")
     assert details[0] == "Traceback (most recent call last):"
     assert details[-1] == "ValueError: broken thing"
+
+
+def test_an_extra_value_that_cannot_be_turned_into_text_does_not_lose_the_line(piped):
+    class Broken:
+        def __str__(self):
+            raise RuntimeError("no text for you")
+
+    configure_logging()
+
+    get_logger("my_app").info("still here", extra={"broken": Broken()})
+
+    assert "still here broken=" in piped.getvalue()
