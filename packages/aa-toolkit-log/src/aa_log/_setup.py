@@ -5,6 +5,7 @@ import os
 import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from typing import TextIO
 
 from aa_log._format import JsonFormatter, TextFormatter
 
@@ -17,9 +18,9 @@ _LEVELS = {
     "CRIT": logging.CRITICAL,
     "CRITICAL": logging.CRITICAL,
 }
-
 _MAX_FILE_BYTES = 10 * 1024 * 1024
 _OLD_FILES_KEPT = 3
+_ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004
 
 _installed: list[logging.Handler] = []
 
@@ -29,20 +30,65 @@ def _env(name: str) -> str | None:
     return os.environ.get(name, "").strip() or None
 
 
-def _parse_level(value: int | str) -> int:
-    return value if isinstance(value, int) else _LEVELS[value.strip().upper()]
+def _parse_level(value: int | str) -> int | None:
+    if isinstance(value, int):
+        return value
+    return _LEVELS.get(str(value).strip().upper())
 
 
-def _screen_formatter(terminal: bool) -> logging.Formatter:
-    style = _env("AA_LOG_FORMAT")
-    if style is None:
-        style = "text" if terminal else "json"
-    return TextFormatter(color=terminal) if style.lower() == "text" else JsonFormatter()
+def _choose_level(level: int | str, problems: list[str]) -> int:
+    chosen = _parse_level(level)
+    if chosen is None:
+        problems.append(f"level={level!r} is not a log level, using INFO")
+        chosen = logging.INFO
+    value = _env("AA_LOG_LEVEL")
+    if value is None:
+        return chosen
+    from_env = _parse_level(value)
+    if from_env is None:
+        name = logging.getLevelName(chosen)
+        problems.append(f"AA_LOG_LEVEL is {value!r}, which is not a log level, using {name}")
+        return chosen
+    return from_env
 
 
-def get_logger(name: str) -> logging.Logger:
-    """Return the standard Python logger for ``name``. Safe at the top of a file."""
-    return logging.getLogger(name)
+def _is_terminal(stream: TextIO) -> bool:
+    try:
+        return stream.isatty()
+    except AttributeError, ValueError:  # no stderr at all, or a closed one
+        return False
+
+
+def _enable_color(stream: TextIO) -> None:
+    """Make a Windows console act on color codes instead of printing them as text."""
+    if sys.platform != "win32":
+        return
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    try:
+        handle = wintypes.HANDLE(msvcrt.get_osfhandle(stream.fileno()))
+    except OSError, ValueError:  # a stream that only acts like a terminal
+        return
+    kernel32 = ctypes.windll.kernel32
+    mode = wintypes.DWORD()
+    if kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+        kernel32.SetConsoleMode(handle, mode.value | _ENABLE_VIRTUAL_TERMINAL_PROCESSING)
+
+
+def _screen_formatter(stream: TextIO, problems: list[str]) -> logging.Formatter:
+    terminal = _is_terminal(stream)
+    automatic = "text" if terminal else "json"
+    style = _env("AA_LOG_FORMAT") or automatic
+    if style.lower() not in ("text", "json"):
+        problems.append(f"AA_LOG_FORMAT is {style!r}, which is not text or json, using {automatic}")
+        style = automatic
+    if style.lower() == "json":
+        return JsonFormatter()
+    if terminal:
+        _enable_color(stream)
+    return TextFormatter(color=terminal)
 
 
 def _file_handler(path: str | os.PathLike[str]) -> logging.Handler:
@@ -58,23 +104,45 @@ def _file_handler(path: str | os.PathLike[str]) -> logging.Handler:
     return handler
 
 
+def _attach(handler: logging.Handler) -> None:
+    logging.getLogger().addHandler(handler)
+    _installed.append(handler)
+
+
+def get_logger(name: str) -> logging.Logger:
+    """Return the standard Python logger for ``name``. Safe at the top of a file."""
+    return logging.getLogger(name)
+
+
 def configure_logging(
     level: int | str = logging.INFO, file: str | os.PathLike[str] | None = None
 ) -> None:
-    """Set up logging for the whole app. Call it once when the app starts."""
+    """Set up logging for the whole app. Call it once when the app starts.
+
+    ``AA_LOG_LEVEL`` and ``AA_LOG_FILE`` override the arguments, and ``AA_LOG_FORMAT``
+    forces the screen style. Calling it again replaces the earlier settings. A problem
+    with any setting is reported as a warning and never stops the app.
+    """
     root = logging.getLogger()
     for handler in _installed:
         root.removeHandler(handler)
         handler.close()
     _installed.clear()
 
+    problems: list[str] = []
     screen = logging.StreamHandler(sys.stderr)
-    screen.setFormatter(_screen_formatter(sys.stderr.isatty()))
-    root.addHandler(screen)
-    _installed.append(screen)
+    screen.setFormatter(_screen_formatter(sys.stderr, problems))
+    _attach(screen)
     path = _env("AA_LOG_FILE") or file
     if path is not None:
-        saved = _file_handler(path)
-        root.addHandler(saved)
-        _installed.append(saved)
-    root.setLevel(_parse_level(_env("AA_LOG_LEVEL") or level))
+        try:
+            _attach(_file_handler(path))
+        except (OSError, TypeError, ValueError) as error:
+            problems.append(f"could not open the log file {path}, logging to screen only: {error}")
+    root.setLevel(_choose_level(level, problems))
+
+    # Its own level, so the warnings still show when the app's level would hide them.
+    setup_log = logging.getLogger("aa_log")
+    setup_log.setLevel(logging.WARNING)
+    for problem in problems:
+        setup_log.warning(problem)

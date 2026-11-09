@@ -38,8 +38,14 @@ def test_the_columns_line_up_across_levels_and_logger_names(piped):
     get_logger("b.c").warning("three")
 
     lines = piped.getvalue().splitlines()
-    assert len({line.index(word) for line, word in zip(lines, ("one", "two", "three"))}) == 1
-    assert len({line.index(name) for line, name in zip(lines, ("a", "my_app", "b.c"))}) == 1
+    assert (
+        len({line.index(word) for line, word in zip(lines, ("one", "two", "three"), strict=True)})
+        == 1
+    )
+    assert (
+        len({line.index(name) for line, name in zip(lines, ("a", "my_app", "b.c"), strict=True)})
+        == 1
+    )
 
 
 def test_the_level_labels_are_short_and_upper_case(piped):
