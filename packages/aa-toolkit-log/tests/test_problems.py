@@ -184,13 +184,14 @@ def test_a_terminal_stream_without_a_file_number_keeps_the_app_running(monkeypat
     configure_logging()
 
 
+@pytest.mark.parametrize("line_break", ["\n", "\r", " ", " ", "\x85"])
 def test_a_line_break_in_a_bad_log_file_path_cannot_add_a_line_to_the_logs(
-    piped, tmp_path, monkeypatch
+    piped, tmp_path, monkeypatch, line_break
 ):
     blocker = tmp_path / "a_file"
     blocker.write_text("")
     monkeypatch.setenv("AA_LOG_FORMAT", "text")
-    monkeypatch.setenv("AA_LOG_FILE", str(blocker / "x\nERROR  forged" / "app.log"))
+    monkeypatch.setenv("AA_LOG_FILE", str(blocker / f"x{line_break}ERROR  forged" / "app.log"))
 
     configure_logging()
 

@@ -145,9 +145,13 @@ def configure_logging(
             problems.append(f"could not open the log file {path}, logging to screen only: {error}")
     root.setLevel(_choose_level(level, problems))
 
-    # Its own level, so the warnings still show when the app's level would hide them.
+    # Straight to the handlers, so the warnings still show when the app's level would hide them.
     setup_log = logging.getLogger("aa_log")
-    setup_log.setLevel(logging.WARNING)
     with contextlib.suppress(ValueError):
         for problem in problems:
-            setup_log.warning(problem.replace("\r", " ").replace("\n", " "))
+            message = " ".join(problem.splitlines())
+            setup_log.handle(
+                setup_log.makeRecord(
+                    setup_log.name, logging.WARNING, __file__, 0, message, (), None
+                )
+            )

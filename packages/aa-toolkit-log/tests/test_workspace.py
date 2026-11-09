@@ -1,5 +1,6 @@
 """The workspace's own tooling covers the log library, and it installs alone."""
 
+import os
 import shlex
 import shutil
 import subprocess
@@ -43,7 +44,10 @@ def test_the_analysis_includes_the_log_library(repo):
     assert "packages/aa-toolkit-log/tests" in settings
 
 
-def test_ci_runs_a_small_app_with_only_the_log_library_installed(repo, ci):
+def test_ci_runs_a_small_app_with_only_the_log_library_installed(repo, ci, tmp_path):
+    elsewhere = tmp_path / "other-1.0.dist-info"
+    elsewhere.mkdir()
+    (elsewhere / "METADATA").write_text("Name: other\nVersion: 1.0\n")
     commands = [
         line.strip().removeprefix("- run: ")
         for line in ci.splitlines()
@@ -55,7 +59,12 @@ def test_ci_runs_a_small_app_with_only_the_log_library_installed(repo, ci):
     uv, *args = shlex.split(commands[0])
 
     done = subprocess.run(
-        [shutil.which(uv) or uv, *args], cwd=repo, capture_output=True, text=True, timeout=300
+        [shutil.which(uv) or uv, *args],
+        cwd=repo,
+        env={**os.environ, "PYTHONPATH": str(tmp_path)},
+        capture_output=True,
+        text=True,
+        timeout=300,
     )
 
     assert done.returncode == 0, done.stderr

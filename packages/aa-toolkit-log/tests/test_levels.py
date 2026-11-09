@@ -58,3 +58,11 @@ def test_both_the_short_and_the_python_level_names_work(piped, monkeypatch, name
     log_each_level()
 
     assert shown(piped)[0] == first_shown
+
+
+def test_setting_up_logging_leaves_loggers_named_after_the_library_at_the_app_level(piped):
+    configure_logging(level="DEBUG")
+
+    get_logger("aa_log.worker").debug("shown")
+
+    assert shown(piped) == ["shown"]

@@ -50,7 +50,7 @@ jobs:
           version: "0.13.7"
       - run: uv python install
       # Not uv sync: all workspace members share one .venv, where an undeclared import still works.
-      - run: uv run --locked --isolated --no-default-groups --package aa-toolkit-log python packages/aa-toolkit-log/tests/alone_app.py
+      - run: uv run --locked --isolated --no-default-groups --package aa-toolkit-log python -I packages/aa-toolkit-log/tests/alone_app.py
 
   sonar:
     name: SonarQube analysis
