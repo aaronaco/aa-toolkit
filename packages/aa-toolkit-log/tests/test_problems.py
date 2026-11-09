@@ -156,3 +156,26 @@ def test_a_closed_stderr_keeps_the_app_running(piped):
     piped.close()
 
     configure_logging()
+
+
+def test_a_closed_stderr_with_a_problem_to_report_keeps_the_app_running(piped, monkeypatch):
+    monkeypatch.setenv("AA_LOG_FORMAT", "yaml")
+    piped.close()
+
+    configure_logging()
+
+
+def test_a_terminal_stream_without_a_file_number_keeps_the_app_running(monkeypatch):
+    class Bare:
+        def isatty(self):
+            return True
+
+        def write(self, text):
+            pass
+
+        def flush(self):
+            pass
+
+    monkeypatch.setattr(sys, "stderr", Bare())
+
+    configure_logging()

@@ -18,6 +18,8 @@ _YELLOW = "\x1b[33m"
 _RED = "\x1b[31m"
 _RESET = "\x1b[0m"
 
+_ESCAPED_LINE_BREAKS = str.maketrans({"": "\u0085", " ": "\u2028", " ": "\u2029"})
+
 _STANDARD_FIELDS = frozenset(vars(logging.makeLogRecord({}))) | {"message", "asctime"}
 
 
@@ -98,4 +100,6 @@ class JsonFormatter(_Formatter):
             payload["exception"] = details
         for key, value in _extra(record).items():
             payload.setdefault(key, _json_value(value))
-        return json.dumps(payload, ensure_ascii=False, default=_text)
+        return json.dumps(payload, ensure_ascii=False, default=_text).translate(
+            _ESCAPED_LINE_BREAKS
+        )

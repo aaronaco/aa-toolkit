@@ -129,3 +129,14 @@ def test_a_value_that_cannot_even_be_turned_into_text_does_not_lose_the_line(pip
     line = lines(piped)[0]
     assert line["message"] == "still here"
     assert isinstance(line["broken"], str)
+
+
+def test_characters_some_readers_treat_as_line_breaks_stay_on_one_line(piped):
+    text = "a\u2028b\u2029c\x85d"
+    configure_logging()
+
+    get_logger("my_app").info(text, extra={"note": text})
+
+    assert len(piped.getvalue().splitlines()) == 1
+    line = lines(piped)[0]
+    assert (line["message"], line["note"]) == (text, text)

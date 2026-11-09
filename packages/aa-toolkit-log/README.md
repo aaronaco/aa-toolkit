@@ -2,7 +2,7 @@
 
 Ready-made logging for apps, on top of Python's built-in logging. It has no dependencies.
 
-An app gets clean, lined-up columns in a terminal and JSON lines when a program runs it, and it can save its logs to a file that can't fill the disk.
+An app gets clean, lined-up columns in a terminal and JSON lines when a tool or an agent runs it, and it can save its logs to a file that can't fill the disk.
 
 ## Install
 

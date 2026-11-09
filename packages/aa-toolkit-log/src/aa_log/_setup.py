@@ -1,5 +1,6 @@
 """Turning logging on for an app."""
 
+import contextlib
 import logging
 import os
 import sys
@@ -69,7 +70,7 @@ def _enable_color(stream: TextIO) -> None:
 
     try:
         handle = wintypes.HANDLE(msvcrt.get_osfhandle(stream.fileno()))
-    except OSError, ValueError:  # a stream that only acts like a terminal
+    except AttributeError, OSError, ValueError:  # a stream that only acts like a terminal
         return
     kernel32 = ctypes.windll.kernel32
     mode = wintypes.DWORD()
@@ -144,5 +145,6 @@ def configure_logging(
     # Its own level, so the warnings still show when the app's level would hide them.
     setup_log = logging.getLogger("aa_log")
     setup_log.setLevel(logging.WARNING)
-    for problem in problems:
-        setup_log.warning(problem)
+    with contextlib.suppress(ValueError):
+        for problem in problems:
+            setup_log.warning(problem)
