@@ -1,6 +1,6 @@
+import contextlib
 import io
 import logging
-import sys
 from pathlib import Path
 
 import pytest
@@ -35,19 +35,25 @@ def _clean_logging(monkeypatch):
 
 
 @pytest.fixture
-def piped(monkeypatch) -> io.StringIO:
-    """Swap stderr for a stream that isn't a terminal."""
-    stream = io.StringIO()
-    monkeypatch.setattr(sys, "stderr", stream)
-    return stream
+def piped() -> io.StringIO:
+    """Run the test with a stderr that isn't a terminal."""
+    return io.StringIO()
 
 
 @pytest.fixture
-def terminal(monkeypatch) -> Terminal:
-    """Swap stderr for a stream that acts like a terminal."""
-    stream = Terminal()
-    monkeypatch.setattr(sys, "stderr", stream)
-    return stream
+def terminal() -> Terminal:
+    """Run the test with a stderr that acts like a terminal."""
+    return Terminal()
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_pyfunc_call(pyfuncitem):
+    """Swap stderr here, because pytest puts its own back when the test body starts."""
+    streams = [pyfuncitem.funcargs[n] for n in ("piped", "terminal") if n in pyfuncitem.funcargs]
+    if not streams:
+        return (yield)
+    with contextlib.redirect_stderr(streams[0]):
+        return (yield)
 
 
 @pytest.fixture
