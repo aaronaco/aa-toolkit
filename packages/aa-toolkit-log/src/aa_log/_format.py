@@ -18,7 +18,7 @@ _YELLOW = "\x1b[33m"
 _RED = "\x1b[31m"
 _RESET = "\x1b[0m"
 
-_ESCAPED_LINE_BREAKS = str.maketrans({"": "\u0085", " ": "\u2028", " ": "\u2029"})
+_ESCAPED_LINE_BREAKS = str.maketrans({0x85: r"\u0085", 0x2028: r"\u2028", 0x2029: r"\u2029"})
 
 _STANDARD_FIELDS = frozenset(vars(logging.makeLogRecord({}))) | {"message", "asctime"}
 
