@@ -32,7 +32,7 @@ order 4521 for [EMAIL]
 
 A `Redactor` doesn't change after it's created, so every thread can share one.
 
-This version has one built-in Detector, `EMAIL`. It reads at most 64 characters before the `@`, so a longer address keeps its first characters.
+This version has one built-in Detector, `EMAIL`. It reads at most 64 characters before the `@`, so a longer address keeps its first characters. An address that uses a symbol such as `!`, `&` or `/` before the `@` keeps what comes before the symbol.
 
 ## Add your own Detector
 
