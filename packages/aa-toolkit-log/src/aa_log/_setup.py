@@ -126,8 +126,10 @@ def configure_logging(
     """Set up logging for the whole app. Call it once when the app starts.
 
     ``AA_LOG_LEVEL`` and ``AA_LOG_FILE`` override the arguments, and ``AA_LOG_FORMAT``
-    forces the screen style. Calling it again replaces the earlier settings. A problem
-    with any setting is reported as a warning and never stops the app.
+    forces the screen style. ``redact`` cleans every line written by these handlers: it gets
+    a dict of ``message``, ``exception``, ``stack`` and ``extra`` and returns the same shape.
+    Calling it again replaces the earlier settings. A problem with any setting is reported
+    as a warning and never stops the app.
     """
     root = logging.getLogger()
     problems: list[str] = []

@@ -45,10 +45,11 @@ Only an app calls `configure_logging()`. A library should log through Python's `
 
 ### Arguments
 
-`configure_logging(level=..., file=...)` takes two optional arguments:
+`configure_logging(level=..., file=..., redact=...)` takes three optional arguments:
 
 - `level`: the lowest level to show, as a name like `"DEBUG"` or a number like `logging.DEBUG`. The default is `INFO`.
 - `file`: a path to save logs to. A relative path is relative to the current folder. By default no file is written.
+- `redact`: a function that cleans every log line before it's written, see [Hiding secrets](#hiding-secrets). By default nothing is cleaned.
 
 ### Environment variables
 
@@ -68,9 +69,48 @@ The file always holds JSON lines in UTF-8, with the same messages as the screen.
 
 Add `*.log` and `*.log.[1-3]` to your `.gitignore`, so a log file and its old copies aren't committed by accident.
 
-## Logs don't hide secrets
+## Hiding secrets
 
-Logs don't hide secrets. Whatever you log is shown on screen and saved to the file as it is, so don't log passwords, tokens or keys.
+By default, logs don't hide secrets: whatever you log is shown on screen and saved to the file as it is. The best fix is not to log passwords, tokens or keys at all. For the ones you don't see coming, such as a token in an error message from another package, pass a function as `redact`.
+
+The redaction library, [`aa-toolkit-redact`](../aa-toolkit-redact/README.md), gives you one. Install it as its README shows, then pass a `Redactor`:
+
+```python
+from aa_log import configure_logging, get_logger
+from aa_redact import Redactor
+
+log = get_logger(__name__)
+
+
+def main() -> None:
+    configure_logging(redact=Redactor())
+    log.info("signed up %s", "ann@example.com", extra={"password": "hunter2"})
+```
+
+That prints:
+
+```text
+14:03:21  INFO   __main__                  signed up [EMAIL] password=[REDACTED]
+```
+
+Every line is cleaned the same way on screen and in the file: the message after its values are filled in, tracebacks, stack information and every `extra` value. Logs from installed packages are cleaned too. The time, level and logger name are left alone. There is no environment variable for it, so a stray setting can't turn it on or off.
+
+If the function fails, the line shows only the time, level, logger and `[REDACTION FAILED]`, and the app carries on. The same happens when a log call's values don't fit its message, such as `log.info("%d", "text")`. A `redact` that can't be called gives a warning, and every line after it shows `[REDACTION FAILED]`.
+
+Only the handlers `configure_logging()` adds are cleaned. A handler your app adds itself gets the raw lines.
+
+`redact` can be any function. It gets one dictionary and returns one of the same shape:
+
+```python
+{
+    "message": "signed up ann@example.com",
+    "exception": None,
+    "stack": None,
+    "extra": {"password": "hunter2"},
+}
+```
+
+`exception` and `stack` are text or `None`, and `extra` holds the `extra` values by name.
 
 ## Names you can't use in `extra`
 
