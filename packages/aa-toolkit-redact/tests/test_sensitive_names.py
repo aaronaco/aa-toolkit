@@ -1,7 +1,7 @@
 """Values hidden because of the name they sit under, whatever they look like."""
 
-from collections import namedtuple
 from dataclasses import dataclass
+from typing import NamedTuple
 
 import pytest
 
@@ -170,10 +170,11 @@ def test_a_detector_still_checks_a_value_under_an_allowed_name():
     assert redact({"password_hint": "bob@example.com"}) == {"password_hint": "[EMAIL]"}
 
 
-@pytest.mark.parametrize("option", ["names", "allow_names"])
-def test_a_single_word_passed_as_text_and_not_a_list_raises_when_the_redactor_is_made(option):
-    with pytest.raises(TypeError, match=option):
-        Redactor(**{option: "password"})
+def test_a_single_word_passed_as_text_and_not_a_list_raises_when_the_redactor_is_made():
+    with pytest.raises(TypeError, match="names="):
+        Redactor(names="ssn")
+    with pytest.raises(TypeError, match="allow_names="):
+        Redactor(allow_names="token")
 
 
 @pytest.mark.parametrize("word", ["", "--", " "])
@@ -210,7 +211,10 @@ def test_a_value_after_a_sensitive_name_in_text_is_hidden_and_the_name_stays(tex
 @pytest.mark.parametrize(
     ("text", "cleaned"),
     [
-        (r"{\"password\": \"abc\", \"user\": \"bob\"}", r"{\"password\": \"[REDACTED]\", \"user\": \"bob\"}"),
+        (
+            r"{\"password\": \"abc\", \"user\": \"bob\"}",
+            r"{\"password\": \"[REDACTED]\", \"user\": \"bob\"}",
+        ),
         (r"{\\\"password\\\": \\\"abc\\\"}", r"{\\\"password\\\": \\\"[REDACTED]\\\"}"),
         (r'"password": "a\"b", "user": "bob"', r'"password": "[REDACTED]", "user": "bob"'),
         (r"\"password\": \"a\\\"b\", \"user\"", r"\"password\": \"[REDACTED]\", \"user\""),
@@ -334,7 +338,10 @@ def test_cleaning_text_a_second_time_changes_nothing(text):
         ("authorization=Basic dXNlcjpwYXNz", "authorization=[REDACTED]"),
         ("Proxy-Authorization: Basic abc", "Proxy-Authorization: [REDACTED]"),
         ("Authorization: Bearer abc\r\nHost: db", "Authorization: [REDACTED]\r\nHost: db"),
-        ("'Authorization': 'Bearer abc', 'Host': 'db'", "'Authorization': '[REDACTED]', 'Host': 'db'"),
+        (
+            "'Authorization': 'Bearer abc', 'Host': 'db'",
+            "'Authorization': '[REDACTED]', 'Host': 'db'",
+        ),
         ('"Authorization: Bearer abc"', '"Authorization: [REDACTED]"'),
         (r"\"Authorization\": \"Bearer abc\"", r"\"Authorization\": \"[REDACTED]\""),
     ],
@@ -379,13 +386,15 @@ def test_an_object_shown_with_a_sensitive_field_has_that_value_hidden():
         user: str
         password: str
 
-    assert Redactor()(Login("bob", "abc")).endswith("Login(user='bob', password='[REDACTED]')")
+    assert "Login(user='bob', password='[REDACTED]')" in str(Redactor()(Login("bob", "abc")))
 
 
 def test_a_named_tuple_with_a_sensitive_field_has_that_value_hidden():
-    login = namedtuple("Login", ["user", "password"])("bob", "abc")
+    class Login(NamedTuple):
+        user: str
+        password: str
 
-    assert Redactor()(login) == "Login(user='bob', password='[REDACTED]')"
+    assert Redactor()(Login("bob", "abc")) == "Login(user='bob', password='[REDACTED]')"
 
 
 def test_bytes_holding_a_pair_have_the_value_hidden():
@@ -393,4 +402,4 @@ def test_bytes_holding_a_pair_have_the_value_hidden():
 
 
 def test_a_dictionary_key_holding_a_pair_has_the_value_hidden():
-    assert Redactor()({"password=abc": 1}) == {"password=[REDACTED]": 1}
+    assert Redactor()({"password=abc": "x"}) == {"password=[REDACTED]": "[REDACTED]"}

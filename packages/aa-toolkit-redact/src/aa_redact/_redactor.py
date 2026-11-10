@@ -6,9 +6,9 @@ from typing import overload
 
 from aa_redact._detectors import BUILT_IN
 from aa_redact._finding import Detector, Finding
-from aa_redact._names import SensitiveNames
+from aa_redact._names import HIDDEN_KIND, SensitiveNames
 
-_HIDDEN = "[REDACTED]"
+_HIDDEN = f"[{HIDDEN_KIND}]"
 _MAX_DEPTH = 32  # far past real data, and well inside Python's recursion limit
 _SHAPES = (list, tuple, set, frozenset)
 
@@ -77,8 +77,9 @@ class Redactor:
     ) -> None:
         off = set(_listed("without", without))
         built_in = (detector for kind, detector in BUILT_IN.items() if kind not in off)
-        self._detectors = (*built_in, *detectors)
         self._names = SensitiveNames(_listed("names", names), _listed("allow_names", allow_names))
+        # Sensitive names come first, so a value hidden by name is always [REDACTED].
+        self._detectors = (self._names.find_values, *built_in, *detectors)
 
     @overload
     def __call__(self, value: str) -> str: ...

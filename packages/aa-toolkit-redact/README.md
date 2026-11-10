@@ -1,6 +1,6 @@
 # aa-toolkit-redact
 
-Takes sensitive values out of text before they leave an app. It uses only Python's standard library, so it has no dependencies.
+Takes sensitive values out of text and data before they leave an app. It uses only Python's standard library, so it has no dependencies.
 
 A `Redactor` finds sensitive values with Detectors and leaves a Placeholder such as `[EMAIL]` where each one was.
 
@@ -14,7 +14,7 @@ uv add "aa-toolkit-redact @ git+https://github.com/aaronaco/aa-toolkit@redact-v0
 
 ## Use
 
-Create a `Redactor` once and call it with text:
+Create a `Redactor` once and call it with any value:
 
 ```python
 from aa_redact import Redactor
@@ -33,6 +33,79 @@ order 4521 for [EMAIL]
 A `Redactor` doesn't change after it's created, so every thread can share one.
 
 This version has one built-in Detector, `EMAIL`. It reads at most 64 characters before the `@`, so a longer address keeps its first characters. An address that uses a symbol such as `!`, `&` or `/` before the `@` keeps what comes before the symbol.
+
+## Clean nested values
+
+A `Redactor` gives back the same shape it was given:
+
+```python
+from aa_redact import Redactor
+
+redact = Redactor()
+
+print(redact({"to": ["bob@example.com"], "qty": 2}))
+```
+
+That prints:
+
+```text
+{'to': ['[EMAIL]'], 'qty': 2}
+```
+
+| Value | What comes back |
+| --- | --- |
+| Text | Text with Placeholders in it. |
+| Dictionary, list, tuple or set | The same shape with every value cleaned, at any depth. Dictionary keys are cleaned too, and two keys that clean to the same text become one. |
+| Number | The same number, or a Placeholder when a Detector matches it. |
+| `None`, `True` or `False` | The same value. |
+| Bytes | Text, decoded as UTF-8 and cleaned. |
+| Any other object, including a named tuple | The text it would be shown as, cleaned. An object that can't be turned into text becomes a note such as `[UNPRINTABLE Customer]`. |
+| A structure that contains itself, or is nested more than 32 levels deep | `[REDACTED]` in place of that part. |
+
+## Hide values by field name
+
+A value under a Sensitive name is hidden whatever it looks like. The same rule applies to `name=value` pairs inside text:
+
+```python
+from aa_redact import Redactor
+
+redact = Redactor()
+
+print(redact({"access_token": "abc123", "token_count": 5}))
+print(redact("login password=abc123 page=2"))
+```
+
+That prints:
+
+```text
+{'access_token': '[REDACTED]', 'token_count': 5}
+login password=[REDACTED] page=2
+```
+
+Names are compared after lower-casing them and treating dashes, underscores and camelCase as word breaks, so `X-Api-Key`, `x_api_key` and `xApiKey` are the same name.
+
+- `password`, `passwd`, `secret` and `credential` match anywhere in the name, so `passwords` and `secret_key` are hidden, and so are harmless names like `secretary`.
+- `token`, `api_key`, `apikey`, `access_key`, `private_key`, `authorization`, `cookie`, `pwd` and `passphrase` match when they are the last words of the name, so `access_token` is hidden and `token_count` isn't.
+
+A dictionary or list under a Sensitive name is hidden as a whole. `None` and booleans stay, because they hold no secret.
+
+Inside text, the pair can be written `name=value`, `name: value`, with quotes, as Python prints a dictionary, or as escaped JSON. The name stays and the value becomes `[REDACTED]`. A value without quotes runs to the next space, `"` or `&`, and a value after `authorization` or `cookie` runs to the end of the line. So `Server=db;Password=abc;Port=1` hides the port as well.
+
+Pass `names=` to add words, which match as the last words of a name. Pass `allow_names=` to keep exact field names visible, both as fields and inside text. It never changes the words, so allowing `token` leaves `access_token` hidden. A value under an allowed name still goes through the Detectors.
+
+```python
+from aa_redact import Redactor
+
+redact = Redactor(names=["ssn"], allow_names=["password_length"])
+
+print(redact({"customer_ssn": "123", "password_length": 12, "password": "abc"}))
+```
+
+That prints:
+
+```text
+{'customer_ssn': '[REDACTED]', 'password_length': 12, 'password': '[REDACTED]'}
+```
 
 ## Add your own Detector
 

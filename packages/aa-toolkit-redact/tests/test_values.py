@@ -1,9 +1,9 @@
 """An app passing any kind of value to a Redactor and getting the same shape back."""
 
 import re
-from collections import namedtuple
 from decimal import Decimal
 from fractions import Fraction
+from typing import NamedTuple
 
 import pytest
 
@@ -107,9 +107,11 @@ def test_an_object_inside_a_structure_is_checked_too():
 
 
 def test_a_named_tuple_is_checked_as_its_text_so_its_field_names_still_count():
-    point = namedtuple("Contact", ["to", "note"])("bob@example.com", "paid")
+    class Contact(NamedTuple):
+        to: str
+        note: str
 
-    assert Redactor()(point) == "Contact(to='[EMAIL]', note='paid')"
+    assert Redactor()(Contact("bob@example.com", "paid")) == "Contact(to='[EMAIL]', note='paid')"
 
 
 def test_an_object_that_cannot_be_turned_into_text_becomes_a_note_naming_its_type():
