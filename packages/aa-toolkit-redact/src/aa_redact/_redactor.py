@@ -1,4 +1,4 @@
-"""Finding sensitive values in text and replacing them with Placeholders."""
+"""Walking any value, finding what's sensitive in it and replacing that with Placeholders."""
 
 from collections.abc import Iterable
 from numbers import Number
@@ -62,6 +62,16 @@ def _holds_no_secret(value: object) -> bool:
     return value is None or isinstance(value, bool)
 
 
+def _shown_as(value: object) -> str | None:
+    """Return the text a value would be shown as, or None when it can't be turned into text."""
+    try:
+        if isinstance(value, bytes | bytearray | memoryview):
+            return bytes(value).decode(errors="replace")
+        return str(value)
+    except Exception:
+        return None
+
+
 class Redactor:
     """Cleans any value, leaving a Placeholder such as [EMAIL] where each sensitive one was."""
 
@@ -94,18 +104,10 @@ class Redactor:
         """Clean one value. `parents` holds the structures this value sits inside."""
         if _holds_no_secret(value):
             return value
-        if isinstance(value, str):
-            return self._clean_text(value)
-        if isinstance(value, bytes | bytearray | memoryview):
-            return self._clean_text(bytes(value).decode(errors="replace"))
-        # A named tuple's field names show only in its text, so it's checked as an object.
-        if isinstance(value, dict | list | tuple | set | frozenset) and not hasattr(
-            value, "_fields"
-        ):
+        if isinstance(value, dict | list | tuple | set | frozenset):
             return self._clean_structure(value, parents)
-        try:
-            text = str(value)
-        except Exception:
+        text = _shown_as(value)
+        if text is None:
             return f"[UNPRINTABLE {type(value).__name__}]"
         cleaned = self._clean_text(text)
         return value if isinstance(value, Number) and cleaned == text else cleaned
@@ -116,17 +118,27 @@ class Redactor:
         parents.add(id(value))
         cleaned: object
         if isinstance(value, dict):
-            cleaned = {}
-            for key, item in value.items():
-                name = self._clean(key, parents)
-                hide = isinstance(name, str) and not _holds_no_secret(item)
-                hide = hide and self._names.hide(name)
-                cleaned[name] = _HIDDEN if hide else self._clean(item, parents)
+            cleaned = {
+                self._clean(key, parents): self._clean_field(key, item, parents)
+                for key, item in value.items()
+            }
+        elif isinstance(value, tuple) and isinstance(
+            fields := getattr(value, "_fields", None), tuple
+        ):
+            pairs = zip(fields, value, strict=True)
+            items = [self._clean_field(field, item, parents) for field, item in pairs]
+            cleaned = tuple.__new__(type(value), items)
         else:
             shape = next(kind for kind in _SHAPES if isinstance(value, kind))
             cleaned = shape([self._clean(item, parents) for item in value])
         parents.remove(id(value))
         return cleaned
+
+    def _clean_field(self, key: object, item: object, parents: set[int]) -> object:
+        name = None if isinstance(key, Number | tuple | frozenset) else _shown_as(key)
+        if name is not None and not _holds_no_secret(item) and self._names.hide(name):
+            return _HIDDEN
+        return self._clean(item, parents)
 
     def _clean_text(self, text: str) -> str:
         return _replace(text, _find(text, self._detectors))

@@ -389,17 +389,61 @@ def test_an_object_shown_with_a_sensitive_field_has_that_value_hidden():
     assert "Login(user='bob', password='[REDACTED]')" in str(Redactor()(Login("bob", "abc")))
 
 
-def test_a_named_tuple_with_a_sensitive_field_has_that_value_hidden():
-    class Login(NamedTuple):
-        user: str
-        password: str
-
-    assert Redactor()(Login("bob", "abc")) == "Login(user='bob', password='[REDACTED]')"
-
-
 def test_bytes_holding_a_pair_have_the_value_hidden():
     assert Redactor()(b"password=abc") == "password=[REDACTED]"
 
 
 def test_a_dictionary_key_holding_a_pair_has_the_value_hidden():
     assert Redactor()({"password=abc": "x"}) == {"password=[REDACTED]": "[REDACTED]"}
+
+
+@pytest.mark.parametrize(
+    ("text", "cleaned"),
+    [
+        ("{'password': ['a]b', 'hunter2'], 'x': 1}", "{'password': [REDACTED], 'x': 1}"),
+        ("{'password': {'a': '}', 'b': 'hunter2'}, 'x': 1}", "{'password': [REDACTED], 'x': 1}"),
+        (r'{"password": {"a": "\"}", "b": "c"}, "x": 1}', r'{"password": [REDACTED], "x": 1}'),
+        ("password={abc}hunter2 next", "password=[REDACTED] next"),
+        ('[{"password": [1]}]', '[{"password": [REDACTED]}]'),
+        ("password=[it's next", "password=[REDACTED]"),
+    ],
+)
+def test_a_structure_after_a_sensitive_name_stays_hidden_to_its_real_end(text, cleaned):
+    assert Redactor()(text) == cleaned
+
+
+def test_a_key_is_compared_as_it_was_written_and_not_after_it_is_cleaned():
+    assert Redactor()({"my_secret@example.com": "hunter2"}) == {"[EMAIL]": "[REDACTED]"}
+
+
+def test_a_placeholder_left_in_a_key_is_not_compared_as_a_name():
+    assert Redactor(names=["email"])({"bob@example.com": "paid"}) == {"[EMAIL]": "paid"}
+
+
+def test_a_very_long_name_in_text_is_still_checked():
+    name = "a" * 300 + "_password"
+
+    assert Redactor()(f"{name}=abc") == f"{name}=[REDACTED]"
+
+
+@pytest.mark.parametrize(
+    ("text", "cleaned"),
+    [
+        (r'{"password": "abc\\", "x": "y"}', r'{"password": "[REDACTED]", "x": "y"}'),
+        (r"\"password\": \"abc\\\\\", \"x\"", r"\"password\": \"[REDACTED]\", \"x\""),
+    ],
+    ids=["escaped once", "escaped twice"],
+)
+def test_a_quoted_value_ending_in_a_backslash_ends_at_its_own_quote(text, cleaned):
+    assert Redactor()(text) == cleaned
+
+
+def test_a_named_tuple_field_with_a_sensitive_name_is_hidden_and_the_tuple_stays():
+    class Login(NamedTuple):
+        user: str
+        password: str
+
+    result = Redactor()(Login("bob", "abc"))
+
+    assert result == Login("bob", "[REDACTED]")
+    assert type(result) is Login

@@ -30,7 +30,7 @@ _WORD = re.compile(r"[^\W_]+")
 # characters is tried once. A value is read in steps, so a name inside it isn't tried again.
 _NAME_AND_SEPARATOR = re.compile(
     r"""
-    (?<![\w.-])(?P<name>[\w.-]{1,256})
+    (?<![\w.-])(?P<name>[\w.-]{1,65536})
     (?:\\{0,32}["'])?                     # the quote that closes a quoted name
     [ \t]{0,8}[=:]{1,2}>?[ \t]{0,8}       # =, :, :=, == or =>
     """,
@@ -38,10 +38,10 @@ _NAME_AND_SEPARATOR = re.compile(
 )
 _OPENING_QUOTE = re.compile(r"""b?(?P<slashes>\\{0,32})(?P<quote>["'])""")
 _OPENING_BRACKETS = ("[", "(", "{")
-_BRACKET = re.compile(r"[\[\](){}]")
+_BRACKET_OR_QUOTE = re.compile(r"""[\[\](){}]|(?P<slashes>\\{0,32})(?P<quote>["'])""")
 _WHOLE_LINE = re.compile(r"[^\r\n]+")
 _UNQUOTED = re.compile(r'[^\s"&]+')
-_AROUND_A_VALUE = ",;:.)}'\"\\ \t"  # punctuation after a value belongs to the text around it
+_AROUND_A_VALUE = ",;:.)}]'\"\\ \t"  # punctuation after a value belongs to the text around it
 
 
 def _words(name: str) -> tuple[str, ...]:
@@ -51,17 +51,24 @@ def _words(name: str) -> tuple[str, ...]:
 
 def _closing_quote(text: str, opening: re.Match[str]) -> int:
     """Find where a quoted value ends. Quotes inside it have more backslashes than its own."""
-    closing = rf"(?<!\\){re.escape(opening['slashes'] + opening['quote'])}"
+    mark = opening["slashes"] + opening["quote"]
+    escaped_backslash = 2 * (len(opening["slashes"]) + 1)
+    closing = rf"(?<!\\)(?:\\{{{escaped_backslash}}})*{re.escape(mark)}"
     found = re.compile(closing).search(text, opening.end())
-    return found.start() if found else len(text)
+    return found.end() - len(mark) if found else len(text)
 
 
 def _closing_bracket(text: str, start: int) -> int:
     depth = 0
-    for bracket in _BRACKET.finditer(text, start):
-        depth += 1 if bracket[0] in _OPENING_BRACKETS else -1
-        if depth == 0:
-            return bracket.end()
+    position = start
+    while token := _BRACKET_OR_QUOTE.search(text, position):
+        position = token.end()
+        if token["quote"]:
+            position = _closing_quote(text, token) + len(token[0])
+        else:
+            depth += 1 if token[0] in _OPENING_BRACKETS else -1
+            if depth == 0:
+                return position
     return len(text)
 
 
@@ -69,10 +76,9 @@ def _value_span(text: str, start: int, whole_line: bool) -> tuple[int, int]:
     """Return where the value starting at `start` begins and ends, without its quotes."""
     if opening := _OPENING_QUOTE.match(text, start):
         return opening.end(), _closing_quote(text, opening)
-    if not whole_line and text.startswith(_OPENING_BRACKETS, start):
-        return start, _closing_bracket(text, start)
-    value = (_WHOLE_LINE if whole_line else _UNQUOTED).match(text, start)
-    return start, start + len(value[0].rstrip(_AROUND_A_VALUE)) if value else start
+    end = _closing_bracket(text, start) if text.startswith(_OPENING_BRACKETS, start) else start
+    rest = (_WHOLE_LINE if whole_line else _UNQUOTED).match(text, end)
+    return start, end + len(rest[0].rstrip(_AROUND_A_VALUE)) if rest else end
 
 
 class SensitiveNames:

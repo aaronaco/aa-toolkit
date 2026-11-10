@@ -55,11 +55,11 @@ That prints:
 | Value | What comes back |
 | --- | --- |
 | Text | Text with Placeholders in it. |
-| Dictionary, list, tuple or set | The same shape with every value cleaned, at any depth. Dictionary keys are cleaned too, and two keys that clean to the same text become one. |
+| Dictionary, list, tuple or set | The same shape with every value cleaned, at any depth. Dictionary keys are cleaned too, and two keys that clean to the same text become one. A named tuple stays that named tuple, with its field names checked. Other subclasses come back as the plain type. |
 | Number | The same number, or a Placeholder when a Detector matches it. |
 | `None`, `True` or `False` | The same value. |
 | Bytes | Text, decoded as UTF-8 and cleaned. |
-| Any other object, including a named tuple | The text it would be shown as, cleaned. An object that can't be turned into text becomes a note such as `[UNPRINTABLE Customer]`. |
+| Any other object | The text it would be shown as, cleaned. An object that can't be turned into text becomes a note such as `[UNPRINTABLE Customer]`. |
 | A structure that contains itself, or is nested more than 32 levels deep | `[REDACTED]` in place of that part. |
 
 ## Hide values by field name

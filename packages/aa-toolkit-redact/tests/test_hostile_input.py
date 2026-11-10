@@ -71,6 +71,12 @@ def fill(piece: str) -> str:
         fill("Authorization: a\n"),
         fill("Cookie: ,\n"),
         fill("b'"),
+        fill("a" * 65535 + "="),
+        'password="' + fill("\\"),
+        fill("password=['"),
+        fill('password=[\\"'),
+        "password=[" + fill("'"),
+        "password=[" + fill("\\"),
     ],
     ids=lambda text: repr(text[:12] + ".." + text[-6:]),
 )

@@ -106,12 +106,19 @@ def test_an_object_inside_a_structure_is_checked_too():
     assert Redactor()({"who": [Customer()]}) == {"who": ["customer [EMAIL]"]}
 
 
-def test_a_named_tuple_is_checked_as_its_text_so_its_field_names_still_count():
+def test_a_named_tuple_comes_back_as_the_same_named_tuple():
     class Contact(NamedTuple):
         to: str
         note: str
 
-    assert Redactor()(Contact("bob@example.com", "paid")) == "Contact(to='[EMAIL]', note='paid')"
+    result = Redactor()(Contact("bob@example.com", "paid"))
+
+    assert result == Contact("[EMAIL]", "paid")
+    assert type(result) is Contact
+
+
+def test_a_key_that_cannot_be_turned_into_text_becomes_a_note_and_its_value_is_still_cleaned():
+    assert Redactor()({Broken(): "bob@example.com"}) == {"[UNPRINTABLE Broken]": "[EMAIL]"}
 
 
 def test_an_object_that_cannot_be_turned_into_text_becomes_a_note_naming_its_type():
