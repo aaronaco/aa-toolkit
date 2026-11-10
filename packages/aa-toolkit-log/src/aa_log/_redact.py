@@ -31,6 +31,14 @@ def _text_or_none(value: object) -> str | None:
     raise _WrongShape
 
 
+def _detached(value: object) -> object:
+    """Return a deep copy of a value, or the value itself when it can't be copied."""
+    try:
+        return copy.deepcopy(value)
+    except Exception:
+        return value
+
+
 def _checked(result: object) -> tuple[str, str | None, str | None, dict[str, object]]:
     """Return the fields of a redact result, or raise when it isn't the shape it was given."""
     if not isinstance(result, Mapping) or set(result) != _FIELDS:
@@ -82,19 +90,19 @@ class Redaction(logging.Filter):
                 return False
 
     def _clean(self, record: logging.LogRecord) -> logging.LogRecord:
-        extras = extra(record)
+        raw_extras = extra(record)
         message, exception, stack, cleaned_extras = _checked(
             self._redact(
                 {
                     "message": record.getMessage(),
                     "exception": _exception(record),
                     "stack": record.stack_info,
-                    "extra": extras,
+                    "extra": {key: _detached(value) for key, value in raw_extras.items()},
                 }
             )
         )
         clean = copy.copy(record)
-        for key in extras:
+        for key in raw_extras:
             delattr(clean, key)
         clean.msg = clean.message = message
         clean.args = ()

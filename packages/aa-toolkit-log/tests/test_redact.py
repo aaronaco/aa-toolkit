@@ -5,6 +5,7 @@ import logging
 import re
 import subprocess
 import sys
+import threading
 from datetime import datetime
 
 import pytest
@@ -288,6 +289,7 @@ def test_a_failed_redaction_in_the_readable_style_keeps_the_columns(piped, monke
 
 BAD_FORMAT_APP = """
 import sys
+import threading
 from aa_log import configure_logging, get_logger
 
 configure_logging(redact=lambda fields: fields)
@@ -350,3 +352,48 @@ def test_only_the_redact_warning_gets_past_a_redact_that_cannot_be_called(
     assert [message for message in messages if "redact=" in message] != []
     assert "[REDACTION FAILED]" in messages
     assert "secret-level" not in piped.getvalue()
+
+
+def test_an_extra_the_function_removes_from_its_input_is_not_written(piped):
+    def removes_password(fields):
+        fields["extra"].pop("password")
+        return fields
+
+    configure_logging(redact=removes_password)
+
+    get_logger("my_app").info("m", extra={"password": "hunter2", "plan": "pro"})
+
+    line = lines(piped)[0]
+    assert (line["message"], line["plan"]) == ("m", "pro")
+    assert "hunter2" not in piped.getvalue()
+
+
+def test_a_function_that_changes_its_input_leaves_the_record_alone(piped):
+    def changes_in_place(fields):
+        fields["extra"]["user"]["pw"] = "[X]"
+        fields["extra"]["tags"].append("added")
+        return fields
+
+    seen = []
+
+    class Keep(logging.Handler):
+        def emit(self, record):
+            seen.append((record.user, record.tags))
+
+    configure_logging(redact=changes_in_place)
+    logging.getLogger().addHandler(Keep())
+
+    get_logger("my_app").info("m", extra={"user": {"pw": "raw-pw"}, "tags": ["a"]})
+
+    assert seen == [({"pw": "raw-pw"}, ["a"])]
+    assert lines(piped)[0]["user"] == {"pw": "[X]"}
+
+
+def test_an_extra_that_cannot_be_copied_is_still_cleaned_and_written(piped):
+    configure_logging(redact=upper)
+
+    get_logger("my_app").info("m", extra={"lock": threading.Lock(), "user": "ann"})
+
+    line = lines(piped)[0]
+    assert (line["message"], line["user"]) == ("M", "ANN")
+    assert "LOCK" in line["lock"]
