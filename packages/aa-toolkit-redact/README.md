@@ -32,7 +32,62 @@ order 4521 for [EMAIL]
 
 A `Redactor` doesn't change after it's created, so every thread can share one.
 
-This version has one built-in Detector, `EMAIL`. It reads at most 64 characters before the `@`, so a longer address keeps its first characters. An address that uses a symbol such as `!`, `&` or `/` before the `@` keeps what comes before the symbol.
+## What's found
+
+These built-in Detectors are on without any setup:
+
+| Kind | What it finds |
+| --- | --- |
+| `AWS_ACCESS_KEY` | AWS access key IDs: `AKIA`, `ASIA`, `ABIA` or `ACCA` and at least 16 more capitals or digits. |
+| `GITHUB_TOKEN` | GitHub tokens: `ghp_`, `gho_`, `ghu_`, `ghs_` or `ghr_` and at least 36 more characters, or `github_pat_` and at least 22. |
+| `API_KEY` | OpenAI-style keys: `sk-` and at least 20 more characters, mixing capitals, small letters and digits. |
+| `SLACK_TOKEN` | Slack tokens: `xoxb-`, `xoxp-`, `xapp-` and the like, with at least 10 more characters. |
+| `JWT` | JSON Web Tokens: three dot-separated parts, the first two starting with `eyJ`. |
+| `BEARER_TOKEN` | `Bearer` and the token after it, when the token has at least 8 characters and isn't a plain word. |
+| `PRIVATE_KEY` | A private key from its begin line through its end line. A key cut off before its end line is hidden up to where its lines stop. |
+| `URL_PASSWORD` | The password in a URL such as `postgres://user:password@host`. The rest of the URL stays. |
+| `EMAIL` | Email addresses. |
+| `CARD` | Card numbers, written as one run of digits or in the groups printed on the card, that start like a real card and pass the Luhn check. |
+
+Tokens match on their prefix and a minimum length, so they keep working when a service makes its tokens longer. A long number that starts like a card and passes the check still becomes `[CARD]`. Turn `CARD` off with `without=` if your app's numbers do that.
+
+The `EMAIL` Detector reads at most 64 characters before the `@`, so a longer address keeps its first characters. An address that uses a symbol such as `!`, `&` or `/` before the `@` keeps what comes before the symbol.
+
+```python
+from aa_redact import Redactor
+
+redact = Redactor()
+
+print(redact("connect postgres://app:hunter2@db.internal:5432/orders failed"))
+print(redact("charged 4111 1111 1111 1111 for order 4521"))
+```
+
+That prints:
+
+```text
+connect postgres://app:[URL_PASSWORD]@db.internal:5432/orders failed
+charged [CARD] for order 4521
+```
+
+### IP addresses and phone numbers
+
+`ip_address` and `phone_number` are built in but off, because whether they count as personal data depends on the app. Pass them in `detectors=` to turn them on:
+
+```python
+from aa_redact import Redactor, ip_address, phone_number
+
+redact = Redactor(detectors=[ip_address, phone_number])
+
+print(redact("login from 203.0.113.7, callback +1 555 123 4567"))
+```
+
+That prints:
+
+```text
+login from [IP_ADDRESS], callback [PHONE]
+```
+
+`ip_address` finds IPv4 and IPv6 addresses. `phone_number` finds numbers that start with `+` and a country code, numbers with an area code in brackets, like `(555) 123-4567`, and numbers written in groups, like `555-123-4567` or `020 7946 0958`. A run of digits with no `+`, brackets or groups isn't found, because it can't be told apart from an order number.
 
 ## Clean nested values
 
