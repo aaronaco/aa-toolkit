@@ -4,9 +4,10 @@ import time
 
 import pytest
 
-from aa_redact import Redactor
+from aa_redact import Redactor, ip_address, phone_number
 
 LENGTH = 64 * 1024
+KEY_BEGIN = "-----BEGIN " + "PRIVATE KEY-----"  # in pieces, so secret scanners skip it
 SECONDS_ALLOWED = 2  # a bounded pattern takes milliseconds, and a slow one takes minutes
 
 
@@ -96,11 +97,89 @@ def fill(piece: str) -> str:
         fill("'a\""),
         fill("\"a'b "),
         '"' + fill('a \\" '),
+        fill("AKIA"),
+        "AKIA" + fill("A"),
+        fill("AKIA" + "A" * 15 + " "),
+        fill("ghp_"),
+        "ghp_" + fill("a"),
+        fill("ghp_" + "a" * 35 + " "),
+        fill("github_pat_"),
+        "github_pat_" + fill("_"),
+        fill("sk-"),
+        "sk-" + fill("a"),
+        "sk-" + fill("a-"),
+        fill("sk-" + "a" * 19 + "-"),
+        fill(" sk-" + "aB1" * 30),
+        fill("xoxb-"),
+        "xoxb-" + fill("1"),
+        fill("eyJ"),
+        fill("eyJaaaaa."),
+        fill(".eyJaaaaa"),
+        "eyJ" + fill("a"),
+        "eyJaaaaa.eyJ" + fill("a"),
+        fill(" eyJaaaaa.eyJaaaaa"),
+        fill("Bearer "),
+        fill("bearer a"),
+        "Bearer " + fill("a"),
+        "Bearer " + fill("aB1"),
+        fill("Bearer " + "a" * 7 + " "),
+        fill("-----BEGIN "),
+        fill(KEY_BEGIN),
+        KEY_BEGIN + fill(chr(10)),
+        KEY_BEGIN + fill(chr(10) + "a"),
+        KEY_BEGIN + fill("\\n" + "a"),
+        KEY_BEGIN + fill(" " * 9 + "a"),
+        KEY_BEGIN + fill(chr(10) + "Proc-Type: a"),
+        KEY_BEGIN + fill(chr(10) + "-----END "),
+        "-----BEGIN" + fill(" "),
+        fill("-----BEGIN" + " A" * 40),
+        fill("a://"),
+        fill("a://:"),
+        fill("a://a:"),
+        fill("a://a:a"),
+        fill("a://:@"),
+        "a://:" + fill("@"),
+        "a://" + fill("a"),
+        "a://a:" + fill("a"),
+        fill("a.") + "://",
+        fill("a://a:a@a.co "),
+        fill("a://a:a@a."),
+        fill("1"),
+        fill("1 "),
+        fill("1-"),
+        fill("1111 "),
+        fill("4111 "),
+        fill("4111-"),
+        fill("4111 111111 "),
+        fill("4" * 19 + " "),
+        fill("4" * 20 + " "),
+        fill("4111111111111111 "),
+        fill("."),
+        fill("1."),
+        fill("1.1.1."),
+        fill(":"),
+        fill("a:"),
+        fill("1:"),
+        fill("::"),
+        fill("aaaa:"),
+        fill("::1."),
+        fill("+"),
+        fill("+1"),
+        fill("+1 "),
+        fill("+1 ("),
+        fill("+1 (1) "),
+        fill("(1"),
+        fill("(111) "),
+        fill("111-"),
+        fill("111.111."),
+        fill("0"),
+        fill("01 "),
+        fill("0111 111 "),
     ],
     ids=lambda text: repr(text[:12] + ".." + text[-6:]),
 )
 def test_the_built_in_detectors_stay_fast_on_long_awkward_text(text):
-    redact = Redactor()
+    redact = Redactor(detectors=[ip_address, phone_number])
 
     started = time.perf_counter()
     redact(text)

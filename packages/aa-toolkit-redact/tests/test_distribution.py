@@ -21,8 +21,14 @@ def test_aa_redact_imports_from_the_package_folder(package_dir):
     assert Path(aa_redact.__file__).resolve().parent == package_dir / "src" / "aa_redact"
 
 
-def test_the_public_interface_is_the_redactor_the_finding_and_the_pattern_helper():
-    assert sorted(aa_redact.__all__) == ["Finding", "Redactor", "pattern"]
+def test_the_public_interface_is_the_redactor_the_finding_the_helpers_and_the_off_detectors():
+    assert sorted(aa_redact.__all__) == [
+        "Finding",
+        "Redactor",
+        "ip_address",
+        "pattern",
+        "phone_number",
+    ]
 
 
 def test_the_package_tells_type_checkers_it_is_typed(package_dir):
