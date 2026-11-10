@@ -1,0 +1,14 @@
+[project]
+name = "aa-toolkit-redact"
+version = "0.1.0"
+description = "Takes sensitive values out of text, with Python's standard library only."
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = []
+
+[build-system]
+requires = ["uv_build>=0.13.7,<0.14"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "aa_redact"
