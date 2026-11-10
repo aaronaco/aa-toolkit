@@ -76,10 +76,10 @@ class Redaction(logging.Filter):
     def __init__(self, redact: Redact) -> None:
         super().__init__()
         self._redact = redact
-        self.passed: list[logging.LogRecord] = []  # records written as they are
+        self.let_through: list[logging.LogRecord] = []
 
     def filter(self, record: logging.LogRecord) -> logging.LogRecord | bool:
-        if any(record is passed for passed in self.passed):
+        if any(record is allowed for allowed in self.let_through):
             return True
         try:
             return self._clean(record)

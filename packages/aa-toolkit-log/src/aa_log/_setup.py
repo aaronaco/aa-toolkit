@@ -142,13 +142,6 @@ def configure_logging(
     _installed.clear()
 
     redaction = None if redact is None else Redaction(redact)
-    uncallable = None
-    if redact is not None and not callable(redact):
-        uncallable = (
-            f"redact= takes a function, and a {type(redact).__name__} can't be called,"
-            f" so every log line shows {FAILED}"
-        )
-        problems.append(uncallable)
 
     screen = logging.StreamHandler(sys.stderr)
     screen.setFormatter(_screen_formatter(sys.stderr, problems))
@@ -163,18 +156,23 @@ def configure_logging(
 
     # Straight to the handlers, so the warnings still show when the app's level would hide them.
     setup_log = logging.getLogger("aa_log")
-    warnings = [
-        setup_log.makeRecord(
-            setup_log.name, logging.WARNING, __file__, 0, " ".join(problem.splitlines()), (), None
+
+    def warning(problem: str) -> logging.LogRecord:
+        message = " ".join(problem.splitlines())
+        return setup_log.makeRecord(setup_log.name, logging.WARNING, __file__, 0, message, (), None)
+
+    warnings = [warning(problem) for problem in problems]
+    if redaction is not None and not callable(redact):
+        uncallable = warning(
+            f"redact= takes a function, and a {type(redact).__name__} can't be called,"
+            f" so every log line shows {FAILED}"
         )
-        for problem in problems
-    ]
-    if redaction is not None:
-        redaction.passed = [w for w, p in zip(warnings, problems, strict=True) if p is uncallable]
+        warnings.insert(0, uncallable)
+        redaction.let_through = [uncallable]
     try:
         with contextlib.suppress(ValueError):
-            for warning in warnings:
-                setup_log.handle(warning)
+            for record in warnings:
+                setup_log.handle(record)
     finally:
         if redaction is not None:
-            redaction.passed = []
+            redaction.let_through = []

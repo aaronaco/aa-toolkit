@@ -339,7 +339,7 @@ def test_no_environment_variable_turns_redaction_on_or_off(piped, monkeypatch, v
     assert [line["message"] for line in lines(piped)] == ["CLEANED", "raw"]
 
 
-@pytest.mark.parametrize("redact", ["not a function"])
+@pytest.mark.parametrize("redact", ["not a function", 42])
 def test_only_the_redact_warning_gets_past_a_redact_that_cannot_be_called(
     piped, monkeypatch, redact
 ):
