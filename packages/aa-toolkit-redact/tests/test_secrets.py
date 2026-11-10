@@ -96,6 +96,8 @@ def with_check_digit(digits: str) -> str:
         (f"maestro {with_check_digit('675900000000000')}", "maestro [CARD]"),
         (f"maestro {with_check_digit('501800000000000000')}", "maestro [CARD]"),
         (f"session {'xo' + 'xd-' + 'abc123%2Fdef456%3Dghi789'} set", "session [SLACK_TOKEN] set"),
+        (f"key {'sk' + '-' + 'abcdefghijklmnopqrstuvwxyzABCDEF'} used", "key [API_KEY] used"),
+        ("sent Bearer abcdefghijklmnopqrstuvwxyz upstream", "sent [BEARER_TOKEN] upstream"),
     ],
 )
 def test_each_built_in_kind_of_value_becomes_its_placeholder(text, cleaned):
@@ -201,6 +203,8 @@ def test_a_number_that_passes_the_luhn_check_without_a_known_issuer_prefix_stays
         f"loaded {private_key(end=False, newline='')}",
         "loaded -----BEGIN " + "PRIVATE KEY-----",
         "loaded -----BEGIN " + "PRIVATE KEY-----\nMIIEvQIBADANBgkq",
+        "loaded -----BEGIN " + "PRIVATE KEY-----\nMIIEvQIBADAN...BgkqhkiG9w0B\nAQEFAASC",
+        "loaded -----BEGIN " + "PRIVATE KEY-----\nMIIEvQIBADAN…BgkqhkiG9w0B",
     ],
 )
 def test_a_private_key_with_no_end_line_is_still_hidden(text):
@@ -211,6 +215,7 @@ def test_a_private_key_with_no_end_line_is_still_hidden(text):
     "key",
     [
         private_key(newline=""),
+        private_key().replace("\nMzEf", "...\nMzEf"),
         private_key().replace("\nMzEf", "MIIEvQIBADANBgkq" * 40 + "\nMzEf"),
     ],
 )

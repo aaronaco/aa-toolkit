@@ -14,3 +14,7 @@ class Finding:
 
 
 type Detector = Callable[[str], Iterable[Finding]]
+
+LONGEST_VALUE = 65536
+"""The longest value a built-in Detector reads, as long as the text a Redactor reads, so a
+long value is never cut short and its end left visible."""

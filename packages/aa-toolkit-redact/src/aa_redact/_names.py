@@ -3,7 +3,7 @@
 import re
 from collections.abc import Iterable
 
-from aa_redact._finding import Finding
+from aa_redact._finding import LONGEST_VALUE, Finding
 
 _ANYWHERE = ("password", "passwd", "secret", "credential")
 _LAST_WORDS = (
@@ -31,7 +31,7 @@ _WORD = re.compile(r"[^\W_]+")
 # The user name in a URL isn't one, so `https://x-access-token:pw@host` keeps its host.
 _NAME = (
     r"""(?<![\w.-])(?<!://)(?<!:\\/\\/)"""
-    r"""(?P<name>[\w.-]{1,65536})(?:\\{0,32}["'])?"""  # with a closing quote
+    rf"""(?P<name>[\w.-]{{1,{LONGEST_VALUE}}})(?:\\{{0,32}}["'])?"""  # with a closing quote
 )
 _SPACED_NAME_CHARACTER = r"(?:\\[^\r\n]|(?!(?P=quote))[^\\\r\n])"
 _SPACED_NAME = (

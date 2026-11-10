@@ -6,7 +6,7 @@ import re
 import unicodedata
 from collections.abc import Callable, Iterator
 
-from aa_redact._finding import Detector, Finding
+from aa_redact._finding import LONGEST_VALUE, Detector, Finding
 
 
 def pattern(kind: str, regex: str) -> Detector:
@@ -60,45 +60,41 @@ _EMAIL = re.compile(
     rf"(?:[xX][nN]--[A-Za-z0-9-]{{1,59}}|(?:[^\W\d_][{_MARK}]{{0,4}}){{2,24}})"
 )
 
-# A value may be as long as the text a Redactor reads, so a long one is never cut short and
-# its end left visible.
-_LONGEST = 65536
-
 # Tokens match on their prefix and a minimum length, so a longer format still matches.
-_AWS = rf"(?<![A-Za-z0-9])(?:AKIA|ASIA|ABIA|ACCA)[A-Z0-9]{{16,{_LONGEST}}}+"
+_AWS = rf"(?<![A-Za-z0-9])(?:AKIA|ASIA|ABIA|ACCA)[A-Z0-9]{{16,{LONGEST_VALUE}}}+"
 _GITHUB = (
-    rf"(?<![A-Za-z0-9])(?:gh[pousr]_[A-Za-z0-9]{{36,{_LONGEST}}}+"
-    rf"|github_pat_[A-Za-z0-9_]{{22,{_LONGEST}}}+)"
+    rf"(?<![A-Za-z0-9])(?:gh[pousr]_[A-Za-z0-9]{{36,{LONGEST_VALUE}}}+"
+    rf"|github_pat_[A-Za-z0-9_]{{22,{LONGEST_VALUE}}}+)"
 )
-_OPENAI_STYLE = rf"(?<![A-Za-z0-9_-])sk-(?P<value>[A-Za-z0-9_-]{{20,{_LONGEST}}}+)"
+_OPENAI_STYLE = rf"(?<![A-Za-z0-9_-])sk-(?P<value>[A-Za-z0-9_-]{{20,{LONGEST_VALUE}}}+)"
 _SLACK = (
     r"(?<![A-Za-z0-9_.-])(?:xox[abcdeprs](?:\.xox[abcdeprs])?|xapp)-"
-    rf"[A-Za-z0-9%-]{{10,{_LONGEST}}}+"
+    rf"[A-Za-z0-9%-]{{10,{LONGEST_VALUE}}}+"
 )
-_JWT_PART = rf"[A-Za-z0-9_-]{{5,{_LONGEST}}}+"
-_JWT = rf"(?<![A-Za-z0-9_-])eyJ{_JWT_PART}\.eyJ{_JWT_PART}\.[A-Za-z0-9_-]{{0,{_LONGEST}}}+"
+_JWT_PART = rf"[A-Za-z0-9_-]{{5,{LONGEST_VALUE}}}+"
+_JWT = rf"(?<![A-Za-z0-9_-])eyJ{_JWT_PART}\.eyJ{_JWT_PART}\.[A-Za-z0-9_-]{{0,{LONGEST_VALUE}}}+"
 _BEARER = (
     r"(?<![A-Za-z0-9_-])(?i:bearer)[ \t]{1,16}+"
-    rf"(?P<value>[A-Za-z0-9._~+/-]{{8,{_LONGEST}}}+={{0,8}}+)"
+    rf"(?P<value>[A-Za-z0-9._~+/-]{{8,{LONGEST_VALUE}}}+={{0,8}}+)"
 )
 
 _KEY_LABEL = r"(?:[A-Z0-9]{1,20} ){0,4}PRIVATE KEY(?: BLOCK)?-----"
 # A real line break, one escaped as \n, or none, as when a key's line breaks were taken out.
 _KEY_LINE_BREAK = r"(?:\s|\\{1,4}[rn]){0,8}+"
 _KEY_HEADER = r"[A-Za-z-]{1,32}+:[ \t]?[\w,.]{1,64}+(?:[ -][\w,.]{1,64}+){0,8}+"
-_KEY_LINE = rf"(?:{_KEY_HEADER}|[A-Za-z0-9+/=]{{1,256}}+)"
+_KEY_LINE = rf"(?:{_KEY_HEADER}|[A-Za-z0-9+/=.…]{{1,256}}+)"  # with ... where it was shortened
 # A key cut off before its end line is hidden up to where its lines stop. A long line is read
 # in pieces, so no part of it is left.
 _PEM = (
-    rf"-----BEGIN {_KEY_LABEL}(?:{_KEY_LINE_BREAK}{_KEY_LINE}){{0,{_LONGEST}}}+"
+    rf"-----BEGIN {_KEY_LABEL}(?:{_KEY_LINE_BREAK}{_KEY_LINE}){{0,{LONGEST_VALUE}}}+"
     rf"(?:{_KEY_LINE_BREAK}-----END {_KEY_LABEL})?"
 )
 
 # A password may hold an @ that wasn't encoded, so it runs to the last @ before the host.
 _URL_PASSWORD = re.compile(
     r"(?<![A-Za-z0-9+.-])[A-Za-z][A-Za-z0-9+.-]{0,31}+:\\?/\\?/"  # :// or JSON's :\/\/
-    rf"[^\s:/?#@\[\]\"'<>\\]{{0,{_LONGEST}}}+"
-    rf":(?P<password>[^\s/?#\"'<>\\]{{1,{_LONGEST}}})@"
+    rf"[^\s:/?#@\[\]\"'<>\\]{{0,{LONGEST_VALUE}}}+"
+    rf":(?P<password>[^\s/?#\"'<>\\]{{1,{LONGEST_VALUE}}})@"
 )
 
 # A card is written as one run of digits, or in the groups printed on it.
@@ -138,13 +134,23 @@ _PHONE = re.compile(
 _NOT_A_DIGIT = re.compile(r"\D", re.ASCII)
 
 
-def _has_a_digit(value: str) -> bool:
-    """Say whether a key has a digit, as a random one does and a name like `sk-learn` doesn't."""
-    return any(character.isdigit() for character in value)
+def _looks_random(value: str) -> bool:
+    """Say whether a key has a digit or both cases, as a random one does and `sk-learn` doesn't."""
+    return any(character.isdigit() for character in value) or (
+        any(character.isupper() for character in value)
+        and any(character.islower() for character in value)
+    )
+
+
+_LONGEST_WORD = 24  # past any English word, so a longer run of letters is a token
 
 
 def _is_plain_word(word: str) -> bool:
-    return word.isalpha() and (word.islower() or word.isupper() or word.istitle())
+    return (
+        len(word) <= _LONGEST_WORD
+        and word.isalpha()
+        and (word.islower() or word.isupper() or word.istitle())
+    )
 
 
 def _is_not_plain_words(value: str) -> bool:
@@ -233,7 +239,7 @@ def phone_number(text: str) -> list[Finding]:
 BUILT_IN: dict[str, Detector] = {
     "AWS_ACCESS_KEY": pattern("AWS_ACCESS_KEY", _AWS),
     "GITHUB_TOKEN": pattern("GITHUB_TOKEN", _GITHUB),
-    "API_KEY": _kept("API_KEY", _OPENAI_STYLE, _has_a_digit),
+    "API_KEY": _kept("API_KEY", _OPENAI_STYLE, _looks_random),
     "SLACK_TOKEN": pattern("SLACK_TOKEN", _SLACK),
     "JWT": pattern("JWT", _JWT),
     "BEARER_TOKEN": _kept("BEARER_TOKEN", _BEARER, _is_not_plain_words),

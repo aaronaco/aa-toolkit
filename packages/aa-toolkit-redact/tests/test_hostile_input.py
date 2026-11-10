@@ -128,6 +128,8 @@ def fill(piece: str) -> str:
         KEY_BEGIN + fill(chr(10)),
         KEY_BEGIN + fill("A"),
         KEY_BEGIN + fill("A:"),
+        KEY_BEGIN + fill("."),
+        fill(KEY_BEGIN + "\n..."),
         fill(KEY_BEGIN + "A" * 300),
         fill("a:\\/\\/a:a@"),
         fill("a:\\/"),
