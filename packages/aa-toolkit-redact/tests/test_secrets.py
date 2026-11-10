@@ -58,6 +58,8 @@ def with_check_digit(digits: str) -> str:
         (f"app {'gh' + 's_' + 'Z9y8X7w6V5u4T3s2R1q0' * 2}", "app [GITHUB_TOKEN]"),
         (f"key {OPENAI_KEY} used", "key [API_KEY] used"),
         (f"key {OPENAI_PROJECT_KEY} used", "key [API_KEY] used"),
+        (f"key {'sk' + '-' + '0123456789abcdef' * 2} used", "key [API_KEY] used"),
+        (f"key {'sk' + '-' + 'AB12' * 8} used", "key [API_KEY] used"),
         (f"bot {SLACK_TOKEN} posted", "bot [SLACK_TOKEN] posted"),
         (f"session {JWT} expired", "session [JWT] expired"),
         (f"session {UNSIGNED_JWT} expired", "session [JWT] expired"),
@@ -79,6 +81,8 @@ def with_check_digit(digits: str) -> str:
         ("mastercard 2223003122003222", "mastercard [CARD]"),
         ("amex 3782 822463 10005", "amex [CARD]"),
         ("amex 378282246310005", "amex [CARD]"),
+        ("amex 3782 8224 6310 005", "amex [CARD]"),
+        ("card 4111.1111.1111.1111 declined", "card [CARD] declined"),
         ("discover 6011111111111117", "discover [CARD]"),
         ("jcb 3530111333300000", "jcb [CARD]"),
         ("diners 30569309025904", "diners [CARD]"),
@@ -163,12 +167,24 @@ def test_a_number_that_passes_the_luhn_check_without_a_known_issuer_prefix_stays
     [
         f"loaded {private_key(end=False)}",
         f"loaded {private_key('RSA ', end=False)}",
+        f"loaded {private_key(end=False, newline='')}",
         "loaded -----BEGIN " + "PRIVATE KEY-----",
         "loaded -----BEGIN " + "PRIVATE KEY-----\nMIIEvQIBADANBgkq",
     ],
 )
 def test_a_private_key_with_no_end_line_is_still_hidden(text):
     assert Redactor()(text) == "loaded [PRIVATE_KEY]"
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        private_key(newline=""),
+        private_key().replace("\nMzEf", "MIIEvQIBADANBgkq" * 40 + "\nMzEf"),
+    ],
+)
+def test_a_private_key_whose_lines_are_joined_or_long_is_hidden_whole(key):
+    assert Redactor()(f"loaded {key} ok") == "loaded [PRIVATE_KEY] ok"
 
 
 def test_a_pgp_private_key_block_is_hidden():
@@ -209,6 +225,15 @@ def test_a_pgp_private_key_block_is_hidden():
         (
             "from postgres://a:x@h1/db to postgres://b:y@h2/db",
             "from postgres://a:[URL_PASSWORD]@h1/db to postgres://b:[URL_PASSWORD]@h2/db",
+        ),
+        (
+            "https://x-access-token:abc123XYZ@github.com/o/r.git",
+            "https://x-access-token:[URL_PASSWORD]@github.com/o/r.git",
+        ),
+        ("postgres://app_token:pw123@db/x", "postgres://app_token:[URL_PASSWORD]@db/x"),
+        (
+            '{"url": "postgres:\\/\\/bob:s3cret@db\\/app"}',
+            '{"url": "postgres:\\/\\/bob:[URL_PASSWORD]@db\\/app"}',
         ),
     ],
 )

@@ -73,10 +73,12 @@ _JWT = (
 _BEARER = r"(?<![A-Za-z0-9_-])(?i:bearer)[ \t]{1,16}+(?P<value>[A-Za-z0-9._~+/-]{8,4096}+={0,8}+)"
 
 _KEY_LABEL = r"(?:[A-Z0-9]{1,20} ){0,4}PRIVATE KEY(?: BLOCK)?-----"
-_KEY_LINE_BREAK = r"(?:\s|\\{1,4}[rn]){1,8}+"  # a real line break, or one escaped as \n
+# A real line break, one escaped as \n, or none, as when a key's line breaks were taken out.
+_KEY_LINE_BREAK = r"(?:\s|\\{1,4}[rn]){0,8}+"
 _KEY_HEADER = r"[A-Za-z-]{1,32}+:[ \t]?[\w,.]{1,64}+(?:[ -][\w,.]{1,64}+){0,8}+"
 _KEY_LINE = rf"(?:{_KEY_HEADER}|[A-Za-z0-9+/=]{{1,256}}+)"
-# A key cut off before its end line is hidden up to where its lines stop.
+# A key cut off before its end line is hidden up to where its lines stop. A long line is read
+# in pieces, so no part of it is left.
 _PEM = (
     rf"-----BEGIN {_KEY_LABEL}(?:{_KEY_LINE_BREAK}{_KEY_LINE}){{0,1024}}+"
     rf"(?:{_KEY_LINE_BREAK}-----END {_KEY_LABEL})?"
@@ -84,7 +86,7 @@ _PEM = (
 
 # A password may hold an @ that wasn't encoded, so it runs to the last @ before the host.
 _URL_PASSWORD = re.compile(
-    r"(?<![A-Za-z0-9+.-])[A-Za-z][A-Za-z0-9+.-]{0,31}+://"
+    r"(?<![A-Za-z0-9+.-])[A-Za-z][A-Za-z0-9+.-]{0,31}+:\\?/\\?/"  # :// or JSON's :\/\/
     r"[^\s:/?#@\[\]\"'<>\\]{0,128}+:(?P<password>[^\s/?#\"'<>\\]{1,256})@"
 )
 
@@ -92,9 +94,9 @@ _URL_PASSWORD = re.compile(
 _CARD = re.compile(
     r"(?<![0-9])(?:"
     r"[0-9]{13,19}+"
-    r"|(?P<main>[0-9]{4}(?P<sep>[ -])[0-9]{4}(?P=sep)[0-9]{4}(?P=sep)[0-9]{4})"
+    r"|(?P<main>[0-9]{4}(?P<sep>[ .-])[0-9]{4}(?P=sep)[0-9]{4}(?P=sep)[0-9]{3,4})"
     r"(?P<tail>(?P=sep)[0-9]{1,3})?"
-    r"|[0-9]{4}(?P<amex_sep>[ -])[0-9]{6}(?P=amex_sep)[0-9]{4,5}"
+    r"|[0-9]{4}(?P<amex_sep>[ .-])[0-9]{6}(?P=amex_sep)[0-9]{4,5}"
     r")(?![0-9])"
 )
 # Each issuer's first digits and the lengths its cards come in.
@@ -123,13 +125,9 @@ _PHONE = re.compile(
 _NOT_A_DIGIT = re.compile(r"[^0-9]")
 
 
-def _mixes_cases_and_digits(value: str) -> bool:
-    """Say whether a key has digits and both cases, as a random one does and a word doesn't."""
-    return (
-        any(character.isdigit() for character in value)
-        and any(character.isupper() for character in value)
-        and any(character.islower() for character in value)
-    )
+def _has_a_digit(value: str) -> bool:
+    """Say whether a key has a digit, as a random one does and a name like `sk-learn` doesn't."""
+    return any(character.isdigit() for character in value)
 
 
 def _is_not_a_plain_word(value: str) -> bool:
@@ -210,7 +208,7 @@ def phone_number(text: str) -> list[Finding]:
 BUILT_IN: dict[str, Detector] = {
     "AWS_ACCESS_KEY": pattern("AWS_ACCESS_KEY", _AWS),
     "GITHUB_TOKEN": pattern("GITHUB_TOKEN", _GITHUB),
-    "API_KEY": _kept("API_KEY", _OPENAI_STYLE, _mixes_cases_and_digits),
+    "API_KEY": _kept("API_KEY", _OPENAI_STYLE, _has_a_digit),
     "SLACK_TOKEN": pattern("SLACK_TOKEN", _SLACK),
     "JWT": pattern("JWT", _JWT),
     "BEARER_TOKEN": _kept("BEARER_TOKEN", _BEARER, _is_not_a_plain_word),
