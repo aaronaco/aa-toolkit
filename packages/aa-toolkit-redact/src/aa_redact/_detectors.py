@@ -2,9 +2,11 @@
 
 import bisect
 import ipaddress
+import json
 import re
 import unicodedata
-from collections.abc import Callable, Iterator
+import urllib.parse
+from collections.abc import Callable, Iterable, Iterator
 
 from aa_redact._finding import LONGEST_VALUE, Detector, Finding
 
@@ -17,6 +19,42 @@ def pattern(kind: str, regex: str) -> Detector:
         return [Finding(kind, *match.span()) for match in compiled.finditer(text) if match[0]]
 
     return detect
+
+
+_PERCENT_ESCAPE = re.compile(r"%[0-9A-Fa-f]{2}")
+
+
+def _known_forms(value: str) -> Iterator[str]:
+    for form in (
+        value,
+        urllib.parse.quote(value, safe=""),
+        urllib.parse.quote(value),
+        urllib.parse.quote_plus(value),
+    ):
+        for ensure_ascii in (True, False):
+            escaped = json.dumps(form, ensure_ascii=ensure_ascii)[1:-1]
+            yield form
+            yield escaped
+            yield escaped.replace("/", r"\/")
+            yield json.dumps(escaped, ensure_ascii=ensure_ascii)[1:-1]
+
+
+def _known_regex(form: str) -> str:
+    return _PERCENT_ESCAPE.sub(lambda match: f"(?i:{match[0]})", re.escape(form))
+
+
+def known_values(kind: str, values: Iterable[str]) -> Detector:
+    """Make a Detector that finds the exact values an app already holds."""
+    if isinstance(values, str):
+        raise TypeError(f"values takes a list, like [{values!r}]")
+    forms = sorted(
+        {form for value in values if value for form in _known_forms(value)},
+        key=len,
+        reverse=True,
+    )
+    if not forms:
+        return lambda text: ()
+    return pattern(kind, "|".join(_known_regex(form) for form in forms))
 
 
 def _kept(kind: str, regex: str, keep: Callable[[str], bool]) -> Detector:

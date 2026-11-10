@@ -26,6 +26,7 @@ def test_the_public_interface_is_the_redactor_the_finding_the_helpers_and_the_of
         "Finding",
         "Redactor",
         "ip_address",
+        "known_values",
         "pattern",
         "phone_number",
     ]
