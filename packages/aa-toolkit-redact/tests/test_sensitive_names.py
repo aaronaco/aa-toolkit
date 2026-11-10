@@ -496,3 +496,39 @@ def test_any_number_of_spaces_around_the_separator_still_hides_the_value(text, c
 )
 def test_a_value_written_as_a_call_is_hidden_to_its_closing_bracket(text, cleaned):
     assert Redactor()(text) == cleaned
+
+
+@pytest.mark.parametrize(
+    ("text", "cleaned"),
+    [
+        (r'{"password\" hint": "s3cr3t"}', r'{"password\" hint": "[REDACTED]"}'),
+        ('{"password\'s hint": "s3cr3t"}', '{"password\'s hint": "[REDACTED]"}'),
+        (r"{\"password\\\" hint\": \"s3cr3t\"}", r"{\"password\\\" hint\": \"[REDACTED]\"}"),
+        (
+            r'{"password\" hint": "s3cr3t", "user": "bob"}',
+            r'{"password\" hint": "[REDACTED]", "user": "bob"}',
+        ),
+    ],
+    ids=["escaped quote", "other quote", "escaped json with escaped quote", "pair after it"],
+)
+def test_a_quoted_name_holding_another_quote_is_compared_as_a_whole(text, cleaned):
+    assert Redactor()(text) == cleaned
+
+
+def test_a_quoted_name_never_runs_into_the_next_pair():
+    text = '{"note": "a b", "user": "bob", "password": "abc"}'
+
+    assert Redactor()(text) == '{"note": "a b", "user": "bob", "password": "[REDACTED]"}'
+
+
+@pytest.mark.parametrize(
+    ("text", "cleaned"),
+    [
+        ('password=Secret[str]("abc def")', "password=[REDACTED]"),
+        ('password=Secret("abc def").reveal() next', "password=[REDACTED] next"),
+        ("password=f(a)(b) next", "password=[REDACTED] next"),
+        ("password=[a] (b) next", "password=[REDACTED] (b) next"),
+    ],
+)
+def test_brackets_and_calls_that_follow_each_other_are_hidden_together(text, cleaned):
+    assert Redactor()(text) == cleaned

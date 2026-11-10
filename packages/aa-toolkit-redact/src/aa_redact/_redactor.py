@@ -104,7 +104,7 @@ class Redactor:
         """Clean one value. `parents` holds the structures this value sits inside."""
         if _holds_no_secret(value):
             return value
-        if isinstance(value, dict | list | tuple | set | frozenset):
+        if isinstance(value, (dict, *_SHAPES)):
             return self._clean_structure(value, parents)
         text = _shown_as(value)
         if text is None:
@@ -136,7 +136,7 @@ class Redactor:
 
     def _clean_field(self, key: object, item: object, parents: set[int]) -> object:
         name = None if isinstance(key, Number | tuple | frozenset) else _shown_as(key)
-        if name is not None and not _holds_no_secret(item) and self._names.hide(name):
+        if name is not None and not _holds_no_secret(item) and self._names.is_sensitive(name):
             return _HIDDEN
         return self._clean(item, parents)
 

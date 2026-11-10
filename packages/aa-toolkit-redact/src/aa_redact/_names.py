@@ -29,13 +29,17 @@ _WORD = re.compile(r"[^\W_]+")
 # A name can start only where a longer name can't have started, so a long run of name
 # characters is tried once. A value is read in steps, so a name inside it isn't tried again.
 _NAME = r"""(?<![\w.-])(?P<name>[\w.-]{1,65536})(?:\\{0,32}["'])?"""  # with a closing quote
-_SPACED_NAME = r"""(?P<quote>\\{0,32}["'])(?P<spaced_name>[^"'\\\r\n]{1,256})(?P=quote)"""
+_SPACED_NAME_CHARACTER = r"(?:\\[^\r\n]|(?!(?P=quote))[^\\\r\n])"
+_SPACED_NAME = (
+    rf"""(?P<quote>\\{{0,32}}["'])(?P<spaced_name>{_SPACED_NAME_CHARACTER}{{1,256}}?)(?P=quote)"""
+)
 _SEPARATOR = r"[ \t]*[=:]{1,2}>?[ \t]*"  # =, :, :=, == or =>
 _NAME_AND_SEPARATOR = re.compile(rf"(?:{_NAME}|{_SPACED_NAME}){_SEPARATOR}")
-_OPENING_QUOTE = re.compile(r"""b?(?P<slashes>\\{0,32})(?P<quote>["'])""")
+_QUOTE = r"""(?P<slashes>\\{0,32})(?P<quote>["'])"""
+_OPENING_QUOTE = re.compile(rf"b?{_QUOTE}")
 _OPENING_BRACKET = re.compile(r"[\w.]{0,256}[\[({]")
 _OPENING_BRACKETS = ("[", "(", "{")
-_BRACKET_OR_QUOTE = re.compile(r"""[\[\](){}]|(?P<slashes>\\{0,32})(?P<quote>["'])""")
+_BRACKET_OR_QUOTE = re.compile(rf"[\[\](){{}}]|{_QUOTE}")
 _WHOLE_LINE = re.compile(r"[^\r\n]+")
 _UNQUOTED = re.compile(r'[^\s"&]+')
 _AROUND_A_VALUE = ",;:.)}]'\"\\ \t"  # punctuation after a value belongs to the text around it
@@ -73,8 +77,9 @@ def _value_span(text: str, start: int, whole_line: bool) -> tuple[int, int]:
     """Return where the value starting at `start` begins and ends, without its quotes."""
     if opening := _OPENING_QUOTE.match(text, start):
         return opening.end(), _closing_quote(text, opening)
-    bracket = _OPENING_BRACKET.match(text, start)
-    end = _closing_bracket(text, bracket.end() - 1) if bracket else start
+    end = start
+    while bracket := _OPENING_BRACKET.match(text, end):
+        end = _closing_bracket(text, bracket.end() - 1)
     rest = (_WHOLE_LINE if whole_line else _UNQUOTED).match(text, end)
     return start, end + len(rest[0].rstrip(_AROUND_A_VALUE)) if rest else end
 
@@ -92,7 +97,7 @@ class SensitiveNames:
         self._endings = (*(_words(word) for word in _LAST_WORDS), *added)
         self._allowed = {_words(name) for name in allow_names}
 
-    def hide(self, name: str) -> bool:
+    def is_sensitive(self, name: str) -> bool:
         """Say whether the value under this field name must be hidden."""
         words = _words(name)
         if words in self._allowed:
@@ -109,7 +114,7 @@ class SensitiveNames:
         while pair := _NAME_AND_SEPARATOR.search(text, position):
             position = pair.end()
             name = pair["name"] or pair["spaced_name"]
-            if self.hide(name):
+            if self.is_sensitive(name):
                 whole_line = _words(name)[-1] in _WHOLE_LINE_NAMES
                 start, end = _value_span(text, pair.end(), whole_line)
                 position = max(position, end)
