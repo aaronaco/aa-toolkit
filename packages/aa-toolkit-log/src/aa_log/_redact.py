@@ -47,7 +47,8 @@ def _detached(value: object, copies: dict[int, object]) -> object:
         copied_list[:] = [_detached(item, copies) for item in value]
         return copied_list
     if isinstance(value, set):
-        return copy.copy(value)
+        copied_set = copies[id(value)] = copy.copy(value)
+        return copied_set
     if isinstance(value, tuple):
         items = [_detached(item, copies) for item in value]
         if all(new is old for new, old in zip(items, value, strict=True)):

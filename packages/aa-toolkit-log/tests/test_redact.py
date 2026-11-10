@@ -451,3 +451,18 @@ def test_an_app_handler_that_writes_tracebacks_its_own_way_does_not_change_ours(
 
     assert lines(piped)[0]["exception"].startswith(start)
     assert "SHORT" not in piped.getvalue()
+
+
+def test_a_value_removed_from_a_shared_set_is_gone_from_every_extra_holding_it(piped):
+    def removes_from_the_first(fields):
+        fields["extra"]["a"].discard("hunter2")
+        return fields
+
+    tags = {"hunter2", "ok"}
+    configure_logging(redact=removes_from_the_first)
+
+    get_logger("my_app").info("m", extra={"a": tags, "b": tags})
+
+    line = lines(piped)[0]
+    assert (line["a"], line["b"]) == ("{'ok'}", "{'ok'}")
+    assert tags == {"hunter2", "ok"}
