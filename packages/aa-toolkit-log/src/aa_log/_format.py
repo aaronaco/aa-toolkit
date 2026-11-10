@@ -20,15 +20,15 @@ _RESET = "\x1b[0m"
 
 _ESCAPED_LINE_BREAKS = str.maketrans({0x85: r"\u0085", 0x2028: r"\u2028", 0x2029: r"\u2029"})
 
-_STANDARD_FIELDS = frozenset(vars(logging.makeLogRecord({}))) | {"message", "asctime"}
+STANDARD_FIELDS = frozenset(vars(logging.makeLogRecord({}))) | {"message", "asctime"}
 
 
 def _label(record: logging.LogRecord) -> str:
     return _LABELS.get(record.levelno, record.levelname)
 
 
-def _extra(record: logging.LogRecord) -> dict[str, object]:
-    return {key: value for key, value in vars(record).items() if key not in _STANDARD_FIELDS}
+def extra(record: logging.LogRecord) -> dict[str, object]:
+    return {key: value for key, value in vars(record).items() if key not in STANDARD_FIELDS}
 
 
 def _text(value: object) -> str:
@@ -54,6 +54,8 @@ class _Formatter(logging.Formatter):
         parts = []
         if record.exc_info:
             parts.append(self.formatException(record.exc_info))
+        elif record.exc_text:
+            parts.append(record.exc_text)
         if record.stack_info:
             parts.append(self.formatStack(record.stack_info))
         return "\n".join(parts) or None
@@ -76,7 +78,7 @@ class TextFormatter(_Formatter):
         return f"{label}{padding}"
 
     def format(self, record: logging.LogRecord) -> str:
-        pairs = [f"{key}={_text(value)}" for key, value in _extra(record).items()]
+        pairs = [f"{key}={_text(value)}" for key, value in extra(record).items()]
         text = " ".join([record.getMessage(), *pairs])
         time = self.formatTime(record, "%H:%M:%S")
         line = f"{time}  {self._level(record)}  {record.name:<{_LOGGER_WIDTH}}  {text}"
@@ -98,7 +100,7 @@ class JsonFormatter(_Formatter):
         details = self._details(record)
         if details:
             payload["exception"] = details
-        for key, value in _extra(record).items():
+        for key, value in extra(record).items():
             payload.setdefault(key, _json_value(value))
         return json.dumps(payload, ensure_ascii=False, default=_text).translate(
             _ESCAPED_LINE_BREAKS

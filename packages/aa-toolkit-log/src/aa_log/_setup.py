@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TextIO
 
 from aa_log._format import JsonFormatter, TextFormatter
+from aa_log._redact import FAILED, Redact, Redaction
 
 _LEVELS = {
     "DEBUG": logging.DEBUG,
@@ -105,7 +106,9 @@ def _file_handler(path: str | os.PathLike[str]) -> logging.Handler:
     return handler
 
 
-def _attach(handler: logging.Handler) -> None:
+def _attach(handler: logging.Handler, redaction: Redaction | None) -> None:
+    if redaction is not None:
+        handler.addFilter(redaction)
     logging.getLogger().addHandler(handler)
     _installed.append(handler)
 
@@ -116,13 +119,17 @@ def get_logger(name: str) -> logging.Logger:
 
 
 def configure_logging(
-    level: int | str = logging.INFO, file: str | os.PathLike[str] | None = None
+    level: int | str = logging.INFO,
+    file: str | os.PathLike[str] | None = None,
+    redact: Redact | None = None,
 ) -> None:
     """Set up logging for the whole app. Call it once when the app starts.
 
     ``AA_LOG_LEVEL`` and ``AA_LOG_FILE`` override the arguments, and ``AA_LOG_FORMAT``
-    forces the screen style. Calling it again replaces the earlier settings. A problem
-    with any setting is reported as a warning and never stops the app.
+    forces the screen style. ``redact`` cleans every line written by these handlers: it gets
+    a dict of ``message``, ``exception``, ``stack`` and ``extra`` and returns the same shape.
+    Calling it again replaces the earlier settings. A problem with any setting is reported
+    as a warning and never stops the app.
     """
     root = logging.getLogger()
     problems: list[str] = []
@@ -134,24 +141,38 @@ def configure_logging(
             problems.append(f"could not close the earlier log file: {error}")
     _installed.clear()
 
+    redaction = None if redact is None else Redaction(redact)
+
     screen = logging.StreamHandler(sys.stderr)
     screen.setFormatter(_screen_formatter(sys.stderr, problems))
-    _attach(screen)
+    _attach(screen, redaction)
     path = _env("AA_LOG_FILE") or file
     if path is not None:
         try:
-            _attach(_file_handler(path))
+            _attach(_file_handler(path), redaction)
         except (OSError, TypeError, ValueError) as error:
             problems.append(f"could not open the log file {path}, logging to screen only: {error}")
     root.setLevel(_choose_level(level, problems))
 
     # Straight to the handlers, so the warnings still show when the app's level would hide them.
     setup_log = logging.getLogger("aa_log")
-    with contextlib.suppress(ValueError):
-        for problem in problems:
-            message = " ".join(problem.splitlines())
-            setup_log.handle(
-                setup_log.makeRecord(
-                    setup_log.name, logging.WARNING, __file__, 0, message, (), None
-                )
-            )
+
+    def warning(problem: str) -> logging.LogRecord:
+        message = " ".join(problem.splitlines())
+        return setup_log.makeRecord(setup_log.name, logging.WARNING, __file__, 0, message, (), None)
+
+    warnings = [warning(problem) for problem in problems]
+    if redaction is not None and not callable(redact):
+        uncallable = warning(
+            f"redact= takes a function, and a {type(redact).__name__} can't be called,"
+            f" so every log line shows {FAILED}"
+        )
+        warnings.insert(0, uncallable)
+        redaction.let_through = [uncallable]
+    try:
+        with contextlib.suppress(ValueError):
+            for record in warnings:
+                setup_log.handle(record)
+    finally:
+        if redaction is not None:
+            redaction.let_through = []
