@@ -28,17 +28,10 @@ _WORD = re.compile(r"[^\W_]+")
 
 # A name can start only where a longer name can't have started, so a long run of name
 # characters is tried once. A value is read in steps, so a name inside it isn't tried again.
-_NAME_AND_SEPARATOR = re.compile(
-    r"""
-    (?:
-        (?<![\w.-])(?P<name>[\w.-]{1,65536})
-        (?:\\{0,32}["'])?                 # the quote that closes a quoted name
-      | (?P<quote>\\{0,32}["'])(?P<spaced_name>[^"'\\\r\n]{1,256})(?P=quote)
-    )
-    [ \t]*[=:]{1,2}>?[ \t]*               # =, :, :=, == or =>
-    """,
-    re.VERBOSE,
-)
+_NAME = r"""(?<![\w.-])(?P<name>[\w.-]{1,65536})(?:\\{0,32}["'])?"""  # with a closing quote
+_SPACED_NAME = r"""(?P<quote>\\{0,32}["'])(?P<spaced_name>[^"'\\\r\n]{1,256})(?P=quote)"""
+_SEPARATOR = r"[ \t]*[=:]{1,2}>?[ \t]*"  # =, :, :=, == or =>
+_NAME_AND_SEPARATOR = re.compile(rf"(?:{_NAME}|{_SPACED_NAME}){_SEPARATOR}")
 _OPENING_QUOTE = re.compile(r"""b?(?P<slashes>\\{0,32})(?P<quote>["'])""")
 _OPENING_BRACKET = re.compile(r"[\w.]{0,256}[\[({]")
 _OPENING_BRACKETS = ("[", "(", "{")
