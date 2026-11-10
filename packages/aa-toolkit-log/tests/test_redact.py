@@ -335,3 +335,18 @@ def test_no_environment_variable_turns_redaction_on_or_off(piped, monkeypatch, v
     get_logger("my_app").info("raw")
 
     assert [line["message"] for line in lines(piped)] == ["CLEANED", "raw"]
+
+
+@pytest.mark.parametrize("redact", ["not a function"])
+def test_only_the_redact_warning_gets_past_a_redact_that_cannot_be_called(
+    piped, monkeypatch, redact
+):
+    monkeypatch.setenv("AA_LOG_LEVEL", "secret-level")
+    configure_logging(redact=redact)
+
+    messages = [line["message"] for line in lines(piped)]
+
+    assert len(messages) == 2
+    assert [message for message in messages if "redact=" in message] != []
+    assert "[REDACTION FAILED]" in messages
+    assert "secret-level" not in piped.getvalue()

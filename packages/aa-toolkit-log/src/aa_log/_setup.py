@@ -142,11 +142,13 @@ def configure_logging(
     _installed.clear()
 
     redaction = None if redact is None else Redaction(redact)
+    uncallable = None
     if redact is not None and not callable(redact):
-        problems.append(
+        uncallable = (
             f"redact= takes a function, and a {type(redact).__name__} can't be called,"
             f" so every log line shows {FAILED}"
         )
+        problems.append(uncallable)
 
     screen = logging.StreamHandler(sys.stderr)
     screen.setFormatter(_screen_formatter(sys.stderr, problems))
@@ -167,8 +169,8 @@ def configure_logging(
         )
         for problem in problems
     ]
-    if redaction is not None and not callable(redact):
-        redaction.passed = warnings  # nothing can clean them, and they say why lines are hidden
+    if redaction is not None:
+        redaction.passed = [w for w, p in zip(warnings, problems, strict=True) if p is uncallable]
     try:
         with contextlib.suppress(ValueError):
             for warning in warnings:
