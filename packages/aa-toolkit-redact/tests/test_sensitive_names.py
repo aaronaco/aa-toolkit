@@ -447,3 +447,52 @@ def test_a_named_tuple_field_with_a_sensitive_name_is_hidden_and_the_tuple_stays
 
     assert result == Login("bob", "[REDACTED]")
     assert type(result) is Login
+
+
+@pytest.mark.parametrize(
+    ("text", "cleaned"),
+    [
+        ('{"API Key": "abc123"}', '{"API Key": "[REDACTED]"}'),
+        ("{'Private Key': 'pk', 'user': 'bob'}", "{'Private Key': '[REDACTED]', 'user': 'bob'}"),
+        (r"{\"Access Token\": \"abc\"}", r"{\"Access Token\": \"[REDACTED]\"}"),
+        ('"my password": abc', '"my password": [REDACTED]'),
+        ('{"note": "API Key", "API Key": "abc"}', '{"note": "API Key", "API Key": "[REDACTED]"}'),
+    ],
+)
+def test_a_quoted_name_with_spaces_in_text_is_compared_as_a_whole(text, cleaned):
+    assert Redactor()(text) == cleaned
+
+
+@pytest.mark.parametrize("text", ['{"Key Count": "3"}', "{'API Key Id': 'k1'}"])
+def test_a_quoted_name_with_spaces_that_is_not_sensitive_stays(text):
+    assert Redactor()(text) == text
+
+
+@pytest.mark.parametrize(
+    ("text", "cleaned"),
+    [
+        ("password:" + " " * 9 + "hunter2", "password:" + " " * 9 + "[REDACTED]"),
+        ("password" + " " * 9 + "= hunter2", "password" + " " * 9 + "= [REDACTED]"),
+        ("password:\t\t\t\t\t\t\t\t\thunter2", "password:\t\t\t\t\t\t\t\t\t[REDACTED]"),
+        (
+            "username: bob\npassword:          hunter2",
+            "username: bob\npassword:          [REDACTED]",
+        ),
+    ],
+    ids=["nine spaces after", "nine spaces before", "nine tabs after", "aligned lines"],
+)
+def test_any_number_of_spaces_around_the_separator_still_hides_the_value(text, cleaned):
+    assert Redactor()(text) == cleaned
+
+
+@pytest.mark.parametrize(
+    ("text", "cleaned"),
+    [
+        ('password=Secret("abc")', "password=[REDACTED]"),
+        ("{'password': Secret('abc def'), 'x': 1}", "{'password': [REDACTED], 'x': 1}"),
+        ("Login(password=SecretStr('abc'))", "Login(password=[REDACTED])"),
+        ("password=pkg.Secret(['a', 'b']) next", "password=[REDACTED] next"),
+    ],
+)
+def test_a_value_written_as_a_call_is_hidden_to_its_closing_bracket(text, cleaned):
+    assert Redactor()(text) == cleaned

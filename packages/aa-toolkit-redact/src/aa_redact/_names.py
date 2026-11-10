@@ -30,13 +30,17 @@ _WORD = re.compile(r"[^\W_]+")
 # characters is tried once. A value is read in steps, so a name inside it isn't tried again.
 _NAME_AND_SEPARATOR = re.compile(
     r"""
-    (?<![\w.-])(?P<name>[\w.-]{1,65536})
-    (?:\\{0,32}["'])?                     # the quote that closes a quoted name
-    [ \t]{0,8}[=:]{1,2}>?[ \t]{0,8}       # =, :, :=, == or =>
+    (?:
+        (?<![\w.-])(?P<name>[\w.-]{1,65536})
+        (?:\\{0,32}["'])?                 # the quote that closes a quoted name
+      | (?P<quote>\\{0,32}["'])(?P<spaced_name>[^"'\\\r\n]{1,256})(?P=quote)
+    )
+    [ \t]*[=:]{1,2}>?[ \t]*               # =, :, :=, == or =>
     """,
     re.VERBOSE,
 )
 _OPENING_QUOTE = re.compile(r"""b?(?P<slashes>\\{0,32})(?P<quote>["'])""")
+_OPENING_BRACKET = re.compile(r"[\w.]{0,256}[\[({]")
 _OPENING_BRACKETS = ("[", "(", "{")
 _BRACKET_OR_QUOTE = re.compile(r"""[\[\](){}]|(?P<slashes>\\{0,32})(?P<quote>["'])""")
 _WHOLE_LINE = re.compile(r"[^\r\n]+")
@@ -76,7 +80,8 @@ def _value_span(text: str, start: int, whole_line: bool) -> tuple[int, int]:
     """Return where the value starting at `start` begins and ends, without its quotes."""
     if opening := _OPENING_QUOTE.match(text, start):
         return opening.end(), _closing_quote(text, opening)
-    end = _closing_bracket(text, start) if text.startswith(_OPENING_BRACKETS, start) else start
+    bracket = _OPENING_BRACKET.match(text, start)
+    end = _closing_bracket(text, bracket.end() - 1) if bracket else start
     rest = (_WHOLE_LINE if whole_line else _UNQUOTED).match(text, end)
     return start, end + len(rest[0].rstrip(_AROUND_A_VALUE)) if rest else end
 
@@ -110,8 +115,9 @@ class SensitiveNames:
         position = 0
         while pair := _NAME_AND_SEPARATOR.search(text, position):
             position = pair.end()
-            if self.hide(pair["name"]):
-                whole_line = _words(pair["name"])[-1] in _WHOLE_LINE_NAMES
+            name = pair["name"] or pair["spaced_name"]
+            if self.hide(name):
+                whole_line = _words(name)[-1] in _WHOLE_LINE_NAMES
                 start, end = _value_span(text, pair.end(), whole_line)
                 position = max(position, end)
                 if start < end:

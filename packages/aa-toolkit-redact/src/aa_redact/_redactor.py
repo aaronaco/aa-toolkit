@@ -88,7 +88,7 @@ class Redactor:
         off = set(_listed("without", without))
         built_in = (detector for kind, detector in BUILT_IN.items() if kind not in off)
         self._names = SensitiveNames(_listed("names", names), _listed("allow_names", allow_names))
-        # Sensitive names come first, so a value hidden by name is always [REDACTED].
+        # Sensitive names come first, so they win a tie with an equally long Finding.
         self._detectors = (self._names.find_values, *built_in, *detectors)
 
     @overload

@@ -89,7 +89,7 @@ Names are compared after lower-casing them and treating dashes, underscores and 
 
 A dictionary or list under a Sensitive name is hidden as a whole. `None` and booleans stay, because they hold no secret.
 
-Inside text, the pair can be written `name=value`, `name: value`, with quotes, as Python prints a dictionary, or as escaped JSON. The name stays and the value becomes `[REDACTED]`. A value without quotes runs to the next space, `"` or `&`, and a value after `authorization` or `cookie` runs to the end of the line. So `Server=db;Password=abc;Port=1` hides the port as well.
+Inside text, the pair can be written `name=value`, `name: value`, with quotes, as Python prints a dictionary, or as escaped JSON. A name in quotes can hold spaces, like `"API Key"`. The name stays and the value becomes `[REDACTED]`. A value in brackets, or written as a call like `Secret('abc')`, is hidden up to its closing bracket. A value without quotes runs to the next space, `"` or `&`, and a value after `authorization` or `cookie` runs to the end of the line. So `Server=db;Password=abc;Port=1` hides the port as well.
 
 Pass `names=` to add words, which match as the last words of a name. Pass `allow_names=` to keep exact field names visible, both as fields and inside text. It never changes the words, so allowing `token` leaves `access_token` hidden. A value under an allowed name still goes through the Detectors.
 
