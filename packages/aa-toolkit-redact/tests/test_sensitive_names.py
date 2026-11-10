@@ -292,6 +292,9 @@ def test_text_with_no_value_under_a_sensitive_name_is_unchanged(text):
         ('"X-Api-Key": "abc"', '"X-Api-Key": "[REDACTED]"'),
         ("PASSWORD_HASH=abc", "PASSWORD_HASH=[REDACTED]"),
         ("db.password=abc", "db.password=[REDACTED]"),
+        ("path//token=abc", "path//token=[REDACTED]"),
+        ("//password: abc", "//password: [REDACTED]"),
+        ("dir\\/token=abc", "dir\\/token=[REDACTED]"),
     ],
 )
 def test_a_name_in_text_is_compared_the_same_way_as_a_field_name(text, cleaned):
