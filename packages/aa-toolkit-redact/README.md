@@ -208,6 +208,24 @@ When a Detector raises an error, the error comes out of the `Redactor`. So does 
 
 When Findings overlap, they become one Placeholder. The longest Finding gives the kind. When two are the same length, the earlier Detector wins: the built-in ones come first, then yours in the order you passed them.
 
+## Hide Known values
+
+`known_values(kind, values)` makes a Detector for the exact secrets your app already holds, such as a database password or a key with no prefix. Each Known value is hidden when it appears as written, URL-encoded or JSON-escaped. Empty values are ignored, so an unset setting can be passed safely, and when one Known value is contained in a longer one, the longer one is matched first.
+
+```python
+from aa_redact import Redactor, known_values
+
+redact = Redactor(detectors=[known_values("DB_PASSWORD", ["p@ss/w0rd", ""])])
+
+print(redact("dsn=https://db.internal/?pw=p%40ss%2Fw0rd"))
+```
+
+That prints:
+
+```text
+dsn=https://db.internal/?pw=[DB_PASSWORD]
+```
+
 ## Turn off a built-in Detector
 
 Pass a list of kinds in `without=`. Every other Detector still runs, and so do the ones you added.
@@ -225,3 +243,32 @@ That prints:
 ```text
 order 4521 for bob.smith@example.com
 ```
+
+## Size limit
+
+Text longer than `max_length`, 64 KB (`65536` characters) by default per value, is cut at the limit and ends with `[TRUNCATED]`. Detectors run on the limit plus a 16 KB margin—big enough for a whole private key—so a value that sits across the cut is still found and no part of it comes back. Text past the cut is never returned.
+
+Pass `max_length=` to set a different limit:
+
+```python
+from aa_redact import Redactor
+
+redact = Redactor(max_length=12)
+
+print(redact("user: bob.smith@example.com and more"))
+```
+
+That prints:
+
+```text
+user: [EMAIL][TRUNCATED]
+```
+
+## What this library can't do
+
+Redaction is a safety net, not a guarantee. The better fix is not logging secrets at all.
+
+- **Values with no recognizable pattern aren't found.** Patterns can't find a person's name, a street address, or an AWS secret access key, which is 40 random base64 characters with no prefix. Pass secrets your app already holds to `known_values()`, or keep them under Sensitive names.
+- **Base64-encoded forms of Known values aren't found.** `known_values()` checks each value as written, URL-encoded and JSON-escaped.
+- **A very slow custom pattern can stall logging.** Every built-in pattern has bounded repeats so hostile input stays fast, and `max_length` caps how much text is checked, but Python's `re` has no timeout. Write custom patterns in `pattern()` with bounded repeats and no nested `+` or `*`.
+- **Log handlers an app adds itself aren't covered.** When used with [`aa-toolkit-log`](../aa-toolkit-log/README.md), `configure_logging(redact=...)` cleans only the handlers it installs.

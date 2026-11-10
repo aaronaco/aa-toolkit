@@ -25,6 +25,7 @@ _PERCENT_ESCAPE = re.compile(r"%[0-9A-Fa-f]{2}")
 
 
 def _known_forms(value: str) -> Iterator[str]:
+    """Yield a Known value as written, URL-encoded and JSON-escaped."""
     for form in (
         value,
         urllib.parse.quote(value, safe=""),
@@ -40,6 +41,7 @@ def _known_forms(value: str) -> Iterator[str]:
 
 
 def _known_regex(form: str) -> str:
+    """Escape a Known value form for regex, matching percent-escapes in either case."""
     return _PERCENT_ESCAPE.sub(lambda match: f"(?i:{match[0]})", re.escape(form))
 
 

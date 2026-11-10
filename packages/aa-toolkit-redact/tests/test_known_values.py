@@ -38,7 +38,7 @@ def test_a_known_value_that_is_url_encoded_is_hidden(value, text, cleaned):
         ('café"1', r'{"k": "caf\u00e9\"1"}', '{"k": "[DB_PASSWORD]"}'),
         ('café"1', r'{"k": "café\"1"}', '{"k": "[DB_PASSWORD]"}'),
         ("a/b/c", r'{"k": "a\/b\/c"}', '{"k": "[DB_PASSWORD]"}'),
-        ('p"ss\\w0rd', r'\"k\": \"p\\\"ss\\\\w0rd\"', r'\"k\": \"[DB_PASSWORD]\"'),
+        ('p"ss\\w0rd', r"\"k\": \"p\\\"ss\\\\w0rd\"", r"\"k\": \"[DB_PASSWORD]\""),
     ],
 )
 def test_a_known_value_that_is_json_escaped_is_hidden(value, text, cleaned):
@@ -76,8 +76,7 @@ def test_a_known_value_that_contains_a_shorter_one_is_matched_whole(shorter, lon
     redact = Redactor(detectors=[known_values("DB_PASSWORD", values)])
 
     assert (
-        redact(f"first {longer} and then {shorter}")
-        == "first [DB_PASSWORD] and then [DB_PASSWORD]"
+        redact(f"first {longer} and then {shorter}") == "first [DB_PASSWORD] and then [DB_PASSWORD]"
     )
 
 

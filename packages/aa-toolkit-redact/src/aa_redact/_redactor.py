@@ -88,6 +88,7 @@ class Redactor:
         allow_names: Iterable[str] = (),
         max_length: int = LONGEST_VALUE,
     ) -> None:
+        """Set up the Detectors, Sensitive names and size limit this Redactor uses."""
         if isinstance(max_length, bool) or not isinstance(max_length, int) or max_length < 1:
             raise ValueError(f"max_length= must be at least 1, not {max_length!r}")
         off = set(_listed("without", without))
@@ -147,6 +148,7 @@ class Redactor:
         return self._clean(item, parents)
 
     def _clean_text(self, text: str) -> str:
+        """Replace every found value in text, cutting text over the limit at `max_length`."""
         limit = self._max_length
         if len(text) <= limit:
             return _replace(text, _find(text, self._detectors))

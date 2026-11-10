@@ -45,9 +45,7 @@ def test_max_length_set_by_the_app_is_used():
         ("correct-horse-battery-staple", "[DB_PASSWORD]"),
     ],
 )
-def test_a_value_sitting_across_the_limit_is_found_and_no_part_of_it_comes_back(
-    value, placeholder
-):
+def test_a_value_sitting_across_the_limit_is_found_and_no_part_of_it_comes_back(value, placeholder):
     redact = Redactor(
         detectors=[known_values("DB_PASSWORD", ["correct-horse-battery-staple"])],
         max_length=10,
