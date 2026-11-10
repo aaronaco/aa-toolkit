@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import TextIO
 
 from aa_log._format import JsonFormatter, TextFormatter
-from aa_log._redact import Redact, Redaction
+from aa_log._redact import FAILED, Redact, Redaction
 
 _LEVELS = {
     "DEBUG": logging.DEBUG,
@@ -106,7 +106,9 @@ def _file_handler(path: str | os.PathLike[str]) -> logging.Handler:
     return handler
 
 
-def _attach(handler: logging.Handler) -> None:
+def _attach(handler: logging.Handler, redaction: Redaction | None) -> None:
+    if redaction is not None:
+        handler.addFilter(redaction)
     logging.getLogger().addHandler(handler)
     _installed.append(handler)
 
@@ -137,27 +139,38 @@ def configure_logging(
             problems.append(f"could not close the earlier log file: {error}")
     _installed.clear()
 
+    redaction = None if redact is None else Redaction(redact)
+    if redact is not None and not callable(redact):
+        problems.append(
+            f"redact= takes a function, and a {type(redact).__name__} can't be called,"
+            f" so every log line shows {FAILED}"
+        )
+
     screen = logging.StreamHandler(sys.stderr)
     screen.setFormatter(_screen_formatter(sys.stderr, problems))
-    _attach(screen)
+    _attach(screen, redaction)
     path = _env("AA_LOG_FILE") or file
     if path is not None:
         try:
-            _attach(_file_handler(path))
+            _attach(_file_handler(path), redaction)
         except (OSError, TypeError, ValueError) as error:
             problems.append(f"could not open the log file {path}, logging to screen only: {error}")
     root.setLevel(_choose_level(level, problems))
-    if redact is not None:
-        for handler in _installed:
-            handler.addFilter(Redaction(redact))
 
     # Straight to the handlers, so the warnings still show when the app's level would hide them.
     setup_log = logging.getLogger("aa_log")
-    with contextlib.suppress(ValueError):
-        for problem in problems:
-            message = " ".join(problem.splitlines())
-            setup_log.handle(
-                setup_log.makeRecord(
-                    setup_log.name, logging.WARNING, __file__, 0, message, (), None
-                )
-            )
+    warnings = [
+        setup_log.makeRecord(
+            setup_log.name, logging.WARNING, __file__, 0, " ".join(problem.splitlines()), (), None
+        )
+        for problem in problems
+    ]
+    if redaction is not None and not callable(redact):
+        redaction.passed = warnings  # nothing can clean them, and they say why lines are hidden
+    try:
+        with contextlib.suppress(ValueError):
+            for warning in warnings:
+                setup_log.handle(warning)
+    finally:
+        if redaction is not None:
+            redaction.passed = []

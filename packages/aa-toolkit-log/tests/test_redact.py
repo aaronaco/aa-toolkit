@@ -2,6 +2,12 @@
 
 import json
 import logging
+import re
+import subprocess
+import sys
+from datetime import datetime
+
+import pytest
 
 from aa_log import configure_logging, get_logger
 
@@ -213,3 +219,119 @@ def test_the_record_other_handlers_get_is_left_alone(piped):
 
     assert seen == [("user ann", "visa")]
     assert lines(piped)[0]["message"] == "USER ANN"
+
+
+def raises(fields):
+    raise RuntimeError("cannot redact " + fields["message"])
+
+
+def wrong_shapes():
+    good = {"message": "m", "exception": None, "stack": None, "extra": {}}
+    return [
+        "just text",
+        None,
+        {"message": "m"},
+        {**good, "more": 1},
+        {**good, "message": 1},
+        {**good, "exception": 1},
+        {**good, "stack": ["s"]},
+        {**good, "extra": ["user"]},
+        {**good, "extra": {1: "user"}},
+        {**good, "extra": {"msg": "forged"}},
+    ]
+
+
+@pytest.mark.parametrize(
+    "redact",
+    [raises, *(lambda fields, shape=shape: shape for shape in wrong_shapes())],
+    ids=["raises", *(f"shape{n}" for n in range(len(wrong_shapes())))],
+)
+def test_a_failed_redaction_writes_only_time_level_logger_and_redaction_failed(piped, redact):
+    configure_logging(redact=redact)
+
+    try:
+        raise ValueError("token abc123")
+    except ValueError:
+        get_logger("my_app").exception("user %s", "ann", extra={"card": "visa"}, stack_info=True)
+    get_logger("my_app").info("still running")
+
+    failed = lines(piped)[0]
+    assert set(failed) == {"time", "level", "logger", "message"}
+    assert (failed["level"], failed["logger"], failed["message"]) == (
+        "error",
+        "my_app",
+        "[REDACTION FAILED]",
+    )
+    assert datetime.fromisoformat(failed["time"]).utcoffset() is not None
+    for raw in ("ann", "visa", "abc123", "Traceback", "Stack"):
+        assert raw not in piped.getvalue()
+    assert len(lines(piped)) == 2
+
+
+def test_a_failed_redaction_in_the_readable_style_keeps_the_columns(piped, monkeypatch):
+    def fails_on_ann(fields):
+        return raises(fields) if "ann" in fields["message"] else fields
+
+    monkeypatch.setenv("AA_LOG_FORMAT", "text")
+    configure_logging(redact=fails_on_ann)
+
+    get_logger("my_app").info("ok")
+    try:
+        raise ValueError("token abc123")
+    except ValueError:
+        get_logger("my_app").exception("user %s", "ann", extra={"card": "visa"})
+
+    ok, failed = piped.getvalue().splitlines()
+    assert re.fullmatch(r"\d\d:\d\d:\d\d  ERROR  my_app +\[REDACTION FAILED\]", failed)
+    assert ok.index("ok") == failed.index("[REDACTION FAILED]")
+
+
+BAD_FORMAT_APP = """
+import sys
+from aa_log import configure_logging, get_logger
+
+configure_logging(redact=lambda fields: fields)
+get_logger("my_app").info("count %d", "secret-value")
+print("still running", file=sys.stderr)
+"""
+
+
+def test_values_that_do_not_fit_the_message_appear_nowhere(monkeypatch):
+    monkeypatch.setenv("AA_LOG_FORMAT", "json")
+
+    done = subprocess.run(
+        [sys.executable, "-c", BAD_FORMAT_APP], capture_output=True, text=True, timeout=60
+    )
+
+    assert done.returncode == 0
+    failed, still_running = done.stderr.splitlines()
+    assert json.loads(failed)["message"] == "[REDACTION FAILED]"
+    assert still_running == "still running"
+    assert "secret-value" not in done.stdout + done.stderr
+
+
+@pytest.mark.parametrize("redact", ["not a function", 42])
+def test_a_redact_that_cannot_be_called_warns_and_every_line_fails(piped, redact):
+    configure_logging(redact=redact)
+
+    get_logger("my_app").info("user %s", "ann")
+
+    warning, line = lines(piped)
+    assert warning["level"] == "warn"
+    assert "redact=" in warning["message"]
+    assert type(redact).__name__ in warning["message"]
+    assert str(redact) not in warning["message"]
+    assert line["message"] == "[REDACTION FAILED]"
+    assert "ann" not in piped.getvalue()
+
+
+@pytest.mark.parametrize("value", ["off", "0", "false", "on"])
+def test_no_environment_variable_turns_redaction_on_or_off(piped, monkeypatch, value):
+    for name in ("AA_LOG_REDACT", "AA_REDACT"):
+        monkeypatch.setenv(name, value)
+    configure_logging(redact=upper)
+    get_logger("my_app").info("cleaned")
+    configure_logging()
+    get_logger("my_app").info("raw")
+
+    assert [line["message"] for line in lines(piped)] == ["CLEANED", "raw"]

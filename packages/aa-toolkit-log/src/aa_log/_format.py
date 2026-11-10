@@ -20,7 +20,7 @@ _RESET = "\x1b[0m"
 
 _ESCAPED_LINE_BREAKS = str.maketrans({0x85: r"\u0085", 0x2028: r"\u2028", 0x2029: r"\u2029"})
 
-_STANDARD_FIELDS = frozenset(vars(logging.makeLogRecord({}))) | {"message", "asctime"}
+STANDARD_FIELDS = frozenset(vars(logging.makeLogRecord({}))) | {"message", "asctime"}
 
 
 def _label(record: logging.LogRecord) -> str:
@@ -28,7 +28,7 @@ def _label(record: logging.LogRecord) -> str:
 
 
 def extra(record: logging.LogRecord) -> dict[str, object]:
-    return {key: value for key, value in vars(record).items() if key not in _STANDARD_FIELDS}
+    return {key: value for key, value in vars(record).items() if key not in STANDARD_FIELDS}
 
 
 def _text(value: object) -> str:
