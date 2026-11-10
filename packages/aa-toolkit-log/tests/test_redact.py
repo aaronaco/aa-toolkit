@@ -1,5 +1,6 @@
 """The redact option: every log line is cleaned by the app's own function before it's written."""
 
+import io
 import json
 import logging
 import re
@@ -427,3 +428,26 @@ def test_shared_and_circular_extras_are_written_as_without_redact(piped):
         {k: v for k, v in line.items() if k != "time"} for line in lines(piped)
     )
     assert passed_through == without
+
+
+class ShortTracebacks(logging.Formatter):
+    def formatException(self, ei):
+        return f"SHORT: {ei[1]}"
+
+
+@pytest.mark.parametrize(
+    ("redact", "start"),
+    [(None, "Traceback (most recent call last):"), (upper, "TRACEBACK (MOST RECENT CALL LAST):")],
+)
+def test_an_app_handler_that_writes_tracebacks_its_own_way_does_not_change_ours(
+    piped, redact, start
+):
+    app_handler = logging.StreamHandler(io.StringIO())
+    app_handler.setFormatter(ShortTracebacks())
+    logging.getLogger().handlers.insert(0, app_handler)
+    configure_logging(redact=redact)
+
+    log_an_error()
+
+    assert lines(piped)[0]["exception"].startswith(start)
+    assert "SHORT" not in piped.getvalue()

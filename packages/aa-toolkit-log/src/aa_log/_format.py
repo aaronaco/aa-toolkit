@@ -52,10 +52,10 @@ class _Formatter(logging.Formatter):
     def _details(self, record: logging.LogRecord) -> str | None:
         """Return the error details and stack of a record, if it has any."""
         parts = []
-        if record.exc_text:
-            parts.append(record.exc_text)
-        elif record.exc_info:
+        if record.exc_info:
             parts.append(self.formatException(record.exc_info))
+        elif record.exc_text:
+            parts.append(record.exc_text)
         if record.stack_info:
             parts.append(self.formatStack(record.stack_info))
         return "\n".join(parts) or None

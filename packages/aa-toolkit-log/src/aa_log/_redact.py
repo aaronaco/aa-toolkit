@@ -18,11 +18,9 @@ class _WrongShape(Exception):
 
 
 def _exception(record: logging.LogRecord) -> str | None:
-    if record.exc_text:
-        return record.exc_text
     if record.exc_info:
         return _TRACEBACKS.formatException(record.exc_info)
-    return None
+    return record.exc_text
 
 
 def _text_or_none(value: object) -> str | None:
