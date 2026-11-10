@@ -466,3 +466,22 @@ def test_a_value_removed_from_a_shared_set_is_gone_from_every_extra_holding_it(p
     line = lines(piped)[0]
     assert (line["a"], line["b"]) == ("{'ok'}", "{'ok'}")
     assert tags == {"hunter2", "ok"}
+
+
+def test_a_tuple_shared_or_in_a_cycle_stays_one_object_in_what_redact_gets(piped):
+    seen = []
+
+    def checks_identity(fields):
+        extras = fields["extra"]
+        seen.append((extras["a"] is extras["b"][0], extras["c"] is extras["d"]))
+        return fields
+
+    in_a_cycle = []
+    pair = (in_a_cycle, "pw")
+    in_a_cycle.append(pair)
+    shared = (["x"],)
+    configure_logging(redact=checks_identity)
+
+    get_logger("my_app").info("m", extra={"a": pair, "b": in_a_cycle, "c": shared, "d": shared})
+
+    assert seen == [(True, True)]

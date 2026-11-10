@@ -51,9 +51,11 @@ def _detached(value: object, copies: dict[int, object]) -> object:
         return copied_set
     if isinstance(value, tuple):
         items = [_detached(item, copies) for item in value]
-        if all(new is old for new, old in zip(items, value, strict=True)):
-            return value
-        return tuple.__new__(type(value), items)
+        if id(value) in copies:
+            return copies[id(value)]
+        unchanged = all(new is old for new, old in zip(items, value, strict=True))
+        copied_tuple = copies[id(value)] = value if unchanged else tuple.__new__(type(value), items)
+        return copied_tuple
     return value
 
 
