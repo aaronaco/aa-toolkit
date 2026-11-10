@@ -27,7 +27,7 @@ def _label(record: logging.LogRecord) -> str:
     return _LABELS.get(record.levelno, record.levelname)
 
 
-def _extra(record: logging.LogRecord) -> dict[str, object]:
+def extra(record: logging.LogRecord) -> dict[str, object]:
     return {key: value for key, value in vars(record).items() if key not in _STANDARD_FIELDS}
 
 
@@ -52,7 +52,9 @@ class _Formatter(logging.Formatter):
     def _details(self, record: logging.LogRecord) -> str | None:
         """Return the error details and stack of a record, if it has any."""
         parts = []
-        if record.exc_info:
+        if record.exc_text:
+            parts.append(record.exc_text)
+        elif record.exc_info:
             parts.append(self.formatException(record.exc_info))
         if record.stack_info:
             parts.append(self.formatStack(record.stack_info))
@@ -76,7 +78,7 @@ class TextFormatter(_Formatter):
         return f"{label}{padding}"
 
     def format(self, record: logging.LogRecord) -> str:
-        pairs = [f"{key}={_text(value)}" for key, value in _extra(record).items()]
+        pairs = [f"{key}={_text(value)}" for key, value in extra(record).items()]
         text = " ".join([record.getMessage(), *pairs])
         time = self.formatTime(record, "%H:%M:%S")
         line = f"{time}  {self._level(record)}  {record.name:<{_LOGGER_WIDTH}}  {text}"
@@ -98,7 +100,7 @@ class JsonFormatter(_Formatter):
         details = self._details(record)
         if details:
             payload["exception"] = details
-        for key, value in _extra(record).items():
+        for key, value in extra(record).items():
             payload.setdefault(key, _json_value(value))
         return json.dumps(payload, ensure_ascii=False, default=_text).translate(
             _ESCAPED_LINE_BREAKS

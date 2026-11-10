@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TextIO
 
 from aa_log._format import JsonFormatter, TextFormatter
+from aa_log._redact import Redact, Redaction
 
 _LEVELS = {
     "DEBUG": logging.DEBUG,
@@ -116,7 +117,9 @@ def get_logger(name: str) -> logging.Logger:
 
 
 def configure_logging(
-    level: int | str = logging.INFO, file: str | os.PathLike[str] | None = None
+    level: int | str = logging.INFO,
+    file: str | os.PathLike[str] | None = None,
+    redact: Redact | None = None,
 ) -> None:
     """Set up logging for the whole app. Call it once when the app starts.
 
@@ -144,6 +147,9 @@ def configure_logging(
         except (OSError, TypeError, ValueError) as error:
             problems.append(f"could not open the log file {path}, logging to screen only: {error}")
     root.setLevel(_choose_level(level, problems))
+    if redact is not None:
+        for handler in _installed:
+            handler.addFilter(Redaction(redact))
 
     # Straight to the handlers, so the warnings still show when the app's level would hide them.
     setup_log = logging.getLogger("aa_log")
