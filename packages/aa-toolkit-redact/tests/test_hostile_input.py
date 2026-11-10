@@ -133,6 +133,8 @@ def fill(piece: str) -> str:
         fill("a:\\/"),
         fill("//a:"),
         fill("4111.1111.1111.111 "),
+        fill("4111 1111-"),
+        fill("xoxd-%"),
         KEY_BEGIN + fill(chr(10) + "a"),
         KEY_BEGIN + fill("\\n" + "a"),
         KEY_BEGIN + fill(" " * 9 + "a"),

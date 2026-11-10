@@ -60,17 +60,27 @@ _EMAIL = re.compile(
     rf"(?:[xX][nN]--[A-Za-z0-9-]{{1,59}}|(?:[^\W\d_][{_MARK}]{{0,4}}){{2,24}})"
 )
 
+# A value may be as long as the text a Redactor reads, so a long one is never cut short and
+# its end left visible.
+_LONGEST = 65536
+
 # Tokens match on their prefix and a minimum length, so a longer format still matches.
-_AWS = r"(?<![A-Za-z0-9])(?:AKIA|ASIA|ABIA|ACCA)[A-Z0-9]{16,128}+"
-_GITHUB = r"(?<![A-Za-z0-9])(?:gh[pousr]_[A-Za-z0-9]{36,255}+|github_pat_[A-Za-z0-9_]{22,255}+)"
-_OPENAI_STYLE = r"(?<![A-Za-z0-9_-])sk-(?P<value>[A-Za-z0-9_-]{20,1024}+)"
-_SLACK = r"(?<![A-Za-z0-9_.-])(?:xox[abceprs](?:\.xox[abceprs])?|xapp)-[A-Za-z0-9-]{10,1024}+"
-_JWT_PART = r"[A-Za-z0-9_-]"
-_JWT = (
-    rf"(?<!{_JWT_PART})eyJ{_JWT_PART}{{5,4096}}+"
-    rf"\.eyJ{_JWT_PART}{{5,8192}}+\.{_JWT_PART}{{0,1024}}+"
+_AWS = rf"(?<![A-Za-z0-9])(?:AKIA|ASIA|ABIA|ACCA)[A-Z0-9]{{16,{_LONGEST}}}+"
+_GITHUB = (
+    rf"(?<![A-Za-z0-9])(?:gh[pousr]_[A-Za-z0-9]{{36,{_LONGEST}}}+"
+    rf"|github_pat_[A-Za-z0-9_]{{22,{_LONGEST}}}+)"
 )
-_BEARER = r"(?<![A-Za-z0-9_-])(?i:bearer)[ \t]{1,16}+(?P<value>[A-Za-z0-9._~+/-]{8,4096}+={0,8}+)"
+_OPENAI_STYLE = rf"(?<![A-Za-z0-9_-])sk-(?P<value>[A-Za-z0-9_-]{{20,{_LONGEST}}}+)"
+_SLACK = (
+    r"(?<![A-Za-z0-9_.-])(?:xox[abcdeprs](?:\.xox[abcdeprs])?|xapp)-"
+    rf"[A-Za-z0-9%-]{{10,{_LONGEST}}}+"
+)
+_JWT_PART = rf"[A-Za-z0-9_-]{{5,{_LONGEST}}}+"
+_JWT = rf"(?<![A-Za-z0-9_-])eyJ{_JWT_PART}\.eyJ{_JWT_PART}\.[A-Za-z0-9_-]{{0,{_LONGEST}}}+"
+_BEARER = (
+    r"(?<![A-Za-z0-9_-])(?i:bearer)[ \t]{1,16}+"
+    rf"(?P<value>[A-Za-z0-9._~+/-]{{8,{_LONGEST}}}+={{0,8}}+)"
+)
 
 _KEY_LABEL = r"(?:[A-Z0-9]{1,20} ){0,4}PRIVATE KEY(?: BLOCK)?-----"
 # A real line break, one escaped as \n, or none, as when a key's line breaks were taken out.
@@ -80,23 +90,25 @@ _KEY_LINE = rf"(?:{_KEY_HEADER}|[A-Za-z0-9+/=]{{1,256}}+)"
 # A key cut off before its end line is hidden up to where its lines stop. A long line is read
 # in pieces, so no part of it is left.
 _PEM = (
-    rf"-----BEGIN {_KEY_LABEL}(?:{_KEY_LINE_BREAK}{_KEY_LINE}){{0,1024}}+"
+    rf"-----BEGIN {_KEY_LABEL}(?:{_KEY_LINE_BREAK}{_KEY_LINE}){{0,{_LONGEST}}}+"
     rf"(?:{_KEY_LINE_BREAK}-----END {_KEY_LABEL})?"
 )
 
 # A password may hold an @ that wasn't encoded, so it runs to the last @ before the host.
 _URL_PASSWORD = re.compile(
     r"(?<![A-Za-z0-9+.-])[A-Za-z][A-Za-z0-9+.-]{0,31}+:\\?/\\?/"  # :// or JSON's :\/\/
-    r"[^\s:/?#@\[\]\"'<>\\]{0,128}+:(?P<password>[^\s/?#\"'<>\\]{1,256})@"
+    rf"[^\s:/?#@\[\]\"'<>\\]{{0,{_LONGEST}}}+"
+    rf":(?P<password>[^\s/?#\"'<>\\]{{1,{_LONGEST}}})@"
 )
 
 # A card is written as one run of digits, or in the groups printed on it.
+_CARD_SEPARATOR = "[ .-]"
 _CARD = re.compile(
     r"(?<![0-9])(?:"
     r"[0-9]{13,19}+"
-    r"|(?P<main>[0-9]{4}(?P<sep>[ .-])[0-9]{4}(?P=sep)[0-9]{4}(?P=sep)[0-9]{3,4})"
-    r"(?P<tail>(?P=sep)[0-9]{1,3})?"
-    r"|[0-9]{4}(?P<amex_sep>[ .-])[0-9]{6}(?P=amex_sep)[0-9]{4,5}"
+    rf"|(?P<main>[0-9]{{4}}{_CARD_SEPARATOR}[0-9]{{4}}{_CARD_SEPARATOR}[0-9]{{4}}"
+    rf"{_CARD_SEPARATOR}[0-9]{{3,4}})(?P<tail>{_CARD_SEPARATOR}[0-9]{{1,3}})?"
+    rf"|[0-9]{{4}}{_CARD_SEPARATOR}[0-9]{{6}}{_CARD_SEPARATOR}[0-9]{{4,5}}"
     r")(?![0-9])"
 )
 # Each issuer's first digits and the lengths its cards come in.
@@ -108,9 +120,10 @@ _CARD_ISSUER = re.compile(
     r"|62[0-9]{14,17}"  # UnionPay
     r"|35(?:2[89]|[3-8][0-9])[0-9]{12,15}"  # JCB
     r"|3(?:0[0-5][0-9]|095|[689][0-9]{2})[0-9]{10,15}"  # Diners Club
+    r"|(?:5018|5020|5038|5893|6304|6759|676[1-3])[0-9]{9,15}"  # Maestro
 )
 
-_IPV4 = re.compile(r"(?<![0-9.])[0-9]{1,3}(?:\.[0-9]{1,3}){3}(?!\.?[0-9])")
+_IPV4 = re.compile(r"(?<![\d.])\d{1,3}(?:\.\d{1,3}){3}(?!\.?\d)", re.ASCII)
 _IPV6 = re.compile(r"(?<![\w:.])[0-9A-Fa-f:.]{2,45}+(?![\w:])")
 _HEX_DIGIT = re.compile(r"[0-9A-Fa-f]")
 
@@ -122,7 +135,7 @@ _PHONE = re.compile(
     r"|0[0-9]{1,4}[ -][0-9]{3,4}[ -][0-9]{3,4}"  # 020 7946 0958
     r")(?!\w)"
 )
-_NOT_A_DIGIT = re.compile(r"[^0-9]")
+_NOT_A_DIGIT = re.compile(r"\D", re.ASCII)
 
 
 def _has_a_digit(value: str) -> bool:
@@ -130,8 +143,13 @@ def _has_a_digit(value: str) -> bool:
     return any(character.isdigit() for character in value)
 
 
-def _is_not_a_plain_word(value: str) -> bool:
-    return not (value.isalpha() and (value.islower() or value.isupper() or value.istitle()))
+def _is_plain_word(word: str) -> bool:
+    return word.isalpha() and (word.islower() or word.isupper() or word.istitle())
+
+
+def _is_not_plain_words(value: str) -> bool:
+    """Say whether a value isn't just words, like `authentication.` or `token-based`."""
+    return not all(_is_plain_word(word) for word in value.replace("-", ".").split(".") if word)
 
 
 def _url_password(text: str) -> list[Finding]:
@@ -141,12 +159,12 @@ def _url_password(text: str) -> list[Finding]:
 
 
 def _email(text: str) -> Iterator[Finding]:
-    """Find emails, leaving out the `password@host` part of a URL, which only looks like one."""
+    """Find emails, leaving out a URL's `password@host`, which only looks like one."""
     passwords = [match.span("password") for match in _URL_PASSWORD.finditer(text)]
     starts = [start for start, _ in passwords]
     for match in _EMAIL.finditer(text):
         before = bisect.bisect_right(starts, match.start()) - 1
-        if before < 0 or match.start() >= passwords[before][1]:
+        if before < 0 or not match.start() < passwords[before][1] < match.end():
             yield Finding("EMAIL", *match.span())
 
 
@@ -186,14 +204,21 @@ def ip_address(text: str) -> list[Finding]:
         found.append(Finding("IP_ADDRESS", *match.span()))
     for match in _IPV6.finditer(text):
         address = match[0].rstrip(".")
-        if ":" not in address or not _HEX_DIGIT.search(address):
-            continue
-        try:
-            ipaddress.IPv6Address(address)
-        except ValueError:
-            continue
-        found.append(Finding("IP_ADDRESS", match.start(), match.start() + len(address)))
+        if not _is_ipv6(address) and address.endswith(":"):
+            address = address[:-1]  # a colon after the address, as in `peer ::1: down`
+        if _is_ipv6(address):
+            found.append(Finding("IP_ADDRESS", match.start(), match.start() + len(address)))
     return found
+
+
+def _is_ipv6(address: str) -> bool:
+    if ":" not in address or not _HEX_DIGIT.search(address):
+        return False
+    try:
+        ipaddress.IPv6Address(address)
+    except ValueError:
+        return False
+    return True
 
 
 def phone_number(text: str) -> list[Finding]:
@@ -211,7 +236,7 @@ BUILT_IN: dict[str, Detector] = {
     "API_KEY": _kept("API_KEY", _OPENAI_STYLE, _has_a_digit),
     "SLACK_TOKEN": pattern("SLACK_TOKEN", _SLACK),
     "JWT": pattern("JWT", _JWT),
-    "BEARER_TOKEN": _kept("BEARER_TOKEN", _BEARER, _is_not_a_plain_word),
+    "BEARER_TOKEN": _kept("BEARER_TOKEN", _BEARER, _is_not_plain_words),
     "PRIVATE_KEY": pattern("PRIVATE_KEY", _PEM),
     "URL_PASSWORD": _url_password,
     "EMAIL": _email,

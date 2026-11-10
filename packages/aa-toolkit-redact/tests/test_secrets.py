@@ -92,9 +92,37 @@ def with_check_digit(digits: str) -> str:
         ("card 4111111111111111 exp 12 25", "card [CARD] exp 12 25"),
         ("card 4111 1111 1111 1111 12 25", "card [CARD] 12 25"),
         ("ref 9999 4111 1111 1111 1111", "ref 9999 [CARD]"),
+        ("card 4111 1111-1111.1111 declined", "card [CARD] declined"),
+        (f"maestro {with_check_digit('675900000000000')}", "maestro [CARD]"),
+        (f"maestro {with_check_digit('501800000000000000')}", "maestro [CARD]"),
+        (f"session {'xo' + 'xd-' + 'abc123%2Fdef456%3Dghi789'} set", "session [SLACK_TOKEN] set"),
     ],
 )
 def test_each_built_in_kind_of_value_becomes_its_placeholder(text, cleaned):
+    assert Redactor()(text) == cleaned
+
+
+BIG_JWT = jwt({"groups": [f"group-{number:05}" for number in range(1500)]})
+KEY_OF_SHORT_LINES = private_key().replace("\nMzEf", "\nA" * 1500 + "\nMzEf")
+
+
+@pytest.mark.parametrize(
+    ("text", "cleaned"),
+    [
+        (f"key {AWS_KEY + 'A1' * 300} used", "key [AWS_ACCESS_KEY] used"),
+        (f"key {GITHUB_TOKEN + 'a1B2' * 100} used", "key [GITHUB_TOKEN] used"),
+        (f"key {OPENAI_KEY * 40} used", "key [API_KEY] used"),
+        (f"key {SLACK_TOKEN * 40} used", "key [SLACK_TOKEN] used"),
+        (f"session {BIG_JWT} expired", "session [JWT] expired"),
+        (f"sent Bearer {BIG_JWT} upstream", "sent [BEARER_TOKEN] upstream"),
+        (
+            f"connect postgres://bob:{'p4ss' * 100}@db/app",
+            "connect postgres://bob:[URL_PASSWORD]@db/app",
+        ),
+        (f"loaded {KEY_OF_SHORT_LINES} ok", "loaded [PRIVATE_KEY] ok"),
+    ],
+)
+def test_a_value_longer_than_usual_is_hidden_whole(text, cleaned):
     assert Redactor()(text) == cleaned
 
 
@@ -117,6 +145,9 @@ def test_each_built_in_kind_of_value_becomes_its_placeholder(text, cleaned):
         "sk-" + "a1B2c3D4e5",
         "sk-" + "abcdefghijklmnopqrstuvwxyzabcdef",
         "task-" + "T3BlbkFJa1B2c3D4e5F6g7H8i9J0kLmN",
+        "uses bearer authentication.",
+        "Bearer token-based auth",
+        "the Bearer Instrument-Holder.",
         "xoxo-hugs-and-kisses-forever",
         "xo" + "xb-" + "12345",
         "eyJhbGciOiJIUzI1NiJ9",
@@ -215,7 +246,7 @@ def test_a_pgp_private_key_block_is_hidden():
         ),
         ("amqp://guest:p@ss@rabbit.local/", "amqp://guest:[URL_PASSWORD]@rabbit.local/"),
         (
-            "mongodb+srv://bob.smith:pw:with:colons@cluster0.example.net",
+            "mongodb" + "+srv://bob.smith:" + "pw:with:colons" + "@cluster0.example.net",
             "mongodb+srv://bob.smith:[URL_PASSWORD]@cluster0.example.net",
         ),
         (
@@ -239,6 +270,12 @@ def test_a_pgp_private_key_block_is_hidden():
 )
 def test_a_password_in_a_url_is_hidden_and_the_rest_of_the_url_stays(text, cleaned):
     assert Redactor()(text) == cleaned
+
+
+def test_an_email_used_as_a_url_password_is_still_hidden_when_url_passwords_are_off():
+    redact = Redactor(without=["URL_PASSWORD"])
+
+    assert redact("smtp://bob:ann@example.com@mail.host") == "smtp://bob:[EMAIL]@mail.host"
 
 
 @pytest.mark.parametrize(

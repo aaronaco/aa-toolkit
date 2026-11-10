@@ -13,6 +13,9 @@ IP_ADDRESSES = [
     ("loopback ::1.", "loopback [IP_ADDRESS]."),
     ("mapped ::ffff:192.0.2.128 ok", "mapped [IP_ADDRESS] ok"),
     ("url http://[2001:db8::1]:8080/", "url http://[[IP_ADDRESS]]:8080/"),
+    ("peer ::1: unavailable", "peer [IP_ADDRESS]: unavailable"),
+    ("peer fe80::1: unavailable", "peer [IP_ADDRESS]: unavailable"),
+    ("route 2001:db8:: is up", "route [IP_ADDRESS] is up"),
 ]
 
 PHONE_NUMBERS = [

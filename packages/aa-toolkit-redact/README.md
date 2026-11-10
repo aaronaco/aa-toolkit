@@ -41,7 +41,7 @@ These built-in Detectors are on without any setup:
 | `AWS_ACCESS_KEY` | AWS access key IDs: `AKIA`, `ASIA`, `ABIA` or `ACCA` and at least 16 more capitals or digits. |
 | `GITHUB_TOKEN` | GitHub tokens: `ghp_`, `gho_`, `ghu_`, `ghs_` or `ghr_` and at least 36 more characters, or `github_pat_` and at least 22. |
 | `API_KEY` | OpenAI-style keys: `sk-` and at least 20 more characters, with at least one digit, so `sk-learn` isn't one. |
-| `SLACK_TOKEN` | Slack tokens: `xoxb-`, `xoxp-`, `xapp-` and the like, with at least 10 more characters. |
+| `SLACK_TOKEN` | Slack tokens: `xoxb-`, `xoxp-`, `xoxd-`, `xapp-` and the like, with at least 10 more characters. |
 | `JWT` | JSON Web Tokens: three dot-separated parts, the first two starting with `eyJ`. |
 | `BEARER_TOKEN` | `Bearer` and the token after it, when the token has at least 8 characters and isn't a plain word. |
 | `PRIVATE_KEY` | A private key from its begin line through its end line. A key cut off before its end line is hidden up to where its lines stop. |
