@@ -289,7 +289,6 @@ def test_a_failed_redaction_in_the_readable_style_keeps_the_columns(piped, monke
 
 BAD_FORMAT_APP = """
 import sys
-import threading
 from aa_log import configure_logging, get_logger
 
 configure_logging(redact=lambda fields: fields)
@@ -378,15 +377,30 @@ def test_a_function_that_changes_its_input_leaves_the_record_alone(piped):
 
     class Keep(logging.Handler):
         def emit(self, record):
-            seen.append((record.user, record.tags))
+            seen.append((record.user["pw"], record.tags))
 
     configure_logging(redact=changes_in_place)
     logging.getLogger().addHandler(Keep())
 
-    get_logger("my_app").info("m", extra={"user": {"pw": "raw-pw"}, "tags": ["a"]})
+    get_logger("my_app").info(
+        "m", extra={"user": {"pw": "raw-pw", "lock": threading.Lock()}, "tags": ["a"]}
+    )
 
-    assert seen == [({"pw": "raw-pw"}, ["a"])]
-    assert lines(piped)[0]["user"] == {"pw": "[X]"}
+    assert seen == [("raw-pw", ["a"])]
+    assert lines(piped)[0]["user"]["pw"] == "[X]"
+
+
+def test_an_object_in_an_extra_is_shown_as_itself(piped):
+    class Thing:
+        pass
+
+    thing = Thing()
+    configure_logging(redact=lambda fields: fields)
+
+    get_logger("my_app").info("m", extra={"thing": thing, "nested": [thing]})
+
+    line = lines(piped)[0]
+    assert (line["thing"], line["nested"]) == (str(thing), [str(thing)])
 
 
 def test_an_extra_that_cannot_be_copied_is_still_cleaned_and_written(piped):
@@ -397,3 +411,19 @@ def test_an_extra_that_cannot_be_copied_is_still_cleaned_and_written(piped):
     line = lines(piped)[0]
     assert (line["message"], line["user"]) == ("M", "ANN")
     assert "LOCK" in line["lock"]
+
+
+def test_shared_and_circular_extras_are_written_as_without_redact(piped):
+    circular = []
+    circular.append(circular)
+    shared = {"pw": "x"}
+    extras = {"circular": circular, "a": shared, "b": (shared, [shared])}
+    configure_logging()
+    get_logger("my_app").info("m", extra=extras)
+    configure_logging(redact=lambda fields: fields)
+    get_logger("my_app").info("m", extra=extras)
+
+    without, passed_through = (
+        {k: v for k, v in line.items() if k != "time"} for line in lines(piped)
+    )
+    assert passed_through == without

@@ -31,12 +31,31 @@ def _text_or_none(value: object) -> str | None:
     raise _WrongShape
 
 
-def _detached(value: object) -> object:
-    """Return a deep copy of a value, or the value itself when it can't be copied."""
-    try:
-        return copy.deepcopy(value)
-    except Exception:
-        return value
+def _detached(value: object, copies: dict[int, object]) -> object:
+    """Copy the dicts, lists, sets and tuples in a value, and keep every other object as it is.
+
+    `copies` maps each container already copied to its copy, so shared and circular parts
+    stay that way.
+    """
+    if id(value) in copies:
+        return copies[id(value)]
+    if isinstance(value, dict):
+        copied_dict = copies[id(value)] = copy.copy(value)
+        for key, item in value.items():
+            copied_dict[key] = _detached(item, copies)
+        return copied_dict
+    if isinstance(value, list):
+        copied_list = copies[id(value)] = copy.copy(value)
+        copied_list[:] = [_detached(item, copies) for item in value]
+        return copied_list
+    if isinstance(value, set):
+        return copy.copy(value)
+    if isinstance(value, tuple):
+        items = [_detached(item, copies) for item in value]
+        if all(new is old for new, old in zip(items, value, strict=True)):
+            return value
+        return tuple.__new__(type(value), items)
+    return value
 
 
 def _checked(result: object) -> tuple[str, str | None, str | None, dict[str, object]]:
@@ -97,7 +116,7 @@ class Redaction(logging.Filter):
                     "message": record.getMessage(),
                     "exception": _exception(record),
                     "stack": record.stack_info,
-                    "extra": {key: _detached(value) for key, value in raw_extras.items()},
+                    "extra": _detached(raw_extras, {}),
                 }
             )
         )

@@ -110,7 +110,7 @@ Only the handlers `configure_logging()` adds are cleaned. A handler your app add
 }
 ```
 
-`exception` and `stack` are text or `None`, and `extra` holds the `extra` values by name.
+`exception` and `stack` are text or `None`, and `extra` holds the `extra` values by name. The dictionaries, lists, sets and tuples it gets are copies, so changing them leaves the app's own record alone. It shouldn't change any other object it gets.
 
 ## Names you can't use in `extra`
 
