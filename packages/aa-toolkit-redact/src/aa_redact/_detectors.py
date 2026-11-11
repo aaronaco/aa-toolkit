@@ -32,6 +32,7 @@ def _known_regex(part: str) -> str:
 
 
 def _json_escape(parts: Iterable[str], *, ensure_ascii: bool) -> list[str]:
+    """Escape each character part the way `json.dumps` writes it inside quotes."""
     return [json.dumps(part, ensure_ascii=ensure_ascii)[1:-1] for part in parts]
 
 
