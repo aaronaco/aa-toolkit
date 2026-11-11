@@ -22,41 +22,59 @@ def pattern(kind: str, regex: str) -> Detector:
 
 
 _PERCENT_ESCAPE = re.compile(r"%[0-9A-Fa-f]{2}")
+_UNICODE_ESCAPE = re.compile(r"(\\+u)([0-9a-f]{4})")
 
 
-def _known_forms(value: str) -> Iterator[str]:
-    """Yield a Known value as written, URL-encoded and JSON-escaped."""
-    for form in (
-        value,
-        urllib.parse.quote(value, safe=""),
-        urllib.parse.quote(value),
-        urllib.parse.quote_plus(value),
+def _known_regex(part: str) -> str:
+    """Escape one encoded character for regex, matching its hex escapes in either case."""
+    escaped = _PERCENT_ESCAPE.sub(lambda match: f"(?i:{match[0]})", re.escape(part))
+    return _UNICODE_ESCAPE.sub(r"\1(?i:\2)", escaped)
+
+
+def _known_forms(value: str) -> Iterator[tuple[int, str]]:
+    """Yield `(length, regex)` for a Known value as written, URL-encoded and JSON-escaped."""
+    for chars in (
+        list(value),
+        [urllib.parse.quote(ch, safe="") for ch in value],
+        [urllib.parse.quote(ch) for ch in value],
+        [urllib.parse.quote_plus(ch) for ch in value],
     ):
         for ensure_ascii in (True, False):
-            escaped = json.dumps(form, ensure_ascii=ensure_ascii)[1:-1]
-            yield form
-            yield escaped
-            yield escaped.replace("/", r"\/")
-            yield json.dumps(escaped, ensure_ascii=ensure_ascii)[1:-1]
-
-
-def _known_regex(form: str) -> str:
-    """Escape a Known value form for regex, matching percent-escapes in either case."""
-    return _PERCENT_ESCAPE.sub(lambda match: f"(?i:{match[0]})", re.escape(form))
+            escaped = [json.dumps(ch, ensure_ascii=ensure_ascii)[1:-1] for ch in chars]
+            for parts in (
+                chars,
+                escaped,
+                [ch.replace("/", r"\/") for ch in escaped],
+                [json.dumps(ch, ensure_ascii=ensure_ascii)[1:-1] for ch in escaped],
+            ):
+                yield sum(len(ch) for ch in parts), "".join(_known_regex(ch) for ch in parts)
 
 
 def known_values(kind: str, values: Iterable[str]) -> Detector:
     """Make a Detector that finds the exact values an app already holds."""
     if isinstance(values, str):
         raise TypeError(f"values takes a list, like [{values!r}]")
-    forms = sorted(
-        {form for value in values if value for form in _known_forms(value)},
-        key=len,
-        reverse=True,
-    )
+    forms = [
+        regex
+        for _, regex in sorted(
+            {form for value in values if value for form in _known_forms(value)},
+            reverse=True,
+        )
+    ]
     if not forms:
         return lambda text: ()
-    return pattern(kind, "|".join(_known_regex(form) for form in forms))
+    compiled = re.compile("|".join(forms))
+
+    def detect(text: str) -> Iterator[Finding]:
+        position = 0
+        end = 0
+        while match := compiled.search(text, position):
+            if match.end() > end:
+                end = match.end()
+                yield Finding(kind, *match.span())
+            position = match.start() + 1
+
+    return detect
 
 
 def _kept(kind: str, regex: str, keep: Callable[[str], bool]) -> Detector:

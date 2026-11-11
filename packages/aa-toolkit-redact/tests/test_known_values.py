@@ -36,6 +36,7 @@ def test_a_known_value_that_is_url_encoded_is_hidden(value, text, cleaned):
         ('p"ss\\w0rd', r'{"k": "p\"ss\\w0rd"}', '{"k": "[DB_PASSWORD]"}'),
         ("line1\nline2\t!", r'{"k": "line1\nline2\t!"}', '{"k": "[DB_PASSWORD]"}'),
         ('café"1', r'{"k": "caf\u00e9\"1"}', '{"k": "[DB_PASSWORD]"}'),
+        ('café"1', r'{"k": "caf\u00E9\"1"}', '{"k": "[DB_PASSWORD]"}'),
         ('café"1', r'{"k": "café\"1"}', '{"k": "[DB_PASSWORD]"}'),
         ("a/b/c", r'{"k": "a\/b\/c"}', '{"k": "[DB_PASSWORD]"}'),
         ('p"ss\\w0rd', r"\"k\": \"p\\\"ss\\\\w0rd\"", r"\"k\": \"[DB_PASSWORD]\""),
@@ -45,6 +46,18 @@ def test_a_known_value_that_is_json_escaped_is_hidden(value, text, cleaned):
     redact = Redactor(detectors=[known_values("DB_PASSWORD", [value])])
 
     assert redact(text) == cleaned
+
+
+def test_a_raw_known_value_with_a_percent_code_keeps_its_case():
+    redact = Redactor(detectors=[known_values("DB_PASSWORD", ["ab%2Fcd"])])
+
+    assert redact("ab%2Fcd and ab%2fcd") == "[DB_PASSWORD] and ab%2fcd"
+
+
+def test_overlapping_known_values_are_hidden_together_with_no_part_left():
+    redact = Redactor(detectors=[known_values("DB_PASSWORD", ["hunter", "ter2"])])
+
+    assert redact("pw is hunter2 today") == "pw is [DB_PASSWORD] today"
 
 
 @pytest.mark.parametrize("values", [[], [""], ["", ""]])

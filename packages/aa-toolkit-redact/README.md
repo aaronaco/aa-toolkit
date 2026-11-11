@@ -246,7 +246,7 @@ order 4521 for bob.smith@example.com
 
 ## Size limit
 
-Text longer than `max_length`, 64 KB (`65536` characters) by default per value, is cut at the limit and ends with `[TRUNCATED]`. Detectors run on the limit plus a 16 KB margin—big enough for a whole private key—so a value that sits across the cut is still found and no part of it comes back. Text past the cut is never returned.
+Text longer than `max_length`, 64 KB (`65536` characters) by default per value, is cut at the limit and ends with `[TRUNCATED]`. Detectors run on the limit plus a 64 KB margin (`LONGEST_VALUE`) so a value that sits across the cut is still found and no part of it comes back. Text past the cut is never returned.
 
 Pass `max_length=` to set a different limit:
 

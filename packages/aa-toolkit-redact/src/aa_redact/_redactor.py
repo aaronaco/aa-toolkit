@@ -10,7 +10,6 @@ from aa_redact._names import HIDDEN_KIND, SensitiveNames
 
 _HIDDEN = f"[{HIDDEN_KIND}]"
 _TRUNCATED = "[TRUNCATED]"
-_KEY_MARGIN = 16 * 1024  # past the cut, big enough to finish reading a whole private key
 _MAX_DEPTH = 32  # far past real data, and well inside Python's recursion limit
 _SHAPES = (list, tuple, set, frozenset)
 
@@ -154,7 +153,8 @@ class Redactor:
             return _replace(text, _find(text, self._detectors))
         findings = [
             finding
-            for finding in _find(text[: limit + _KEY_MARGIN], self._detectors)
+            for finding in _find(text[: limit + LONGEST_VALUE], self._detectors)
             if finding.start < limit
         ]
+        # A Finding that runs past `limit` leaves `done >= limit`, so the tail after it is empty.
         return _replace(text[:limit], findings) + _TRUNCATED

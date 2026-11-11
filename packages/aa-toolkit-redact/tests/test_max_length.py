@@ -36,6 +36,9 @@ def test_max_length_set_by_the_app_is_used():
     assert redact("0123456789 extra") == "0123456789[TRUNCATED]"
 
 
+LONG_KNOWN_VALUE = "k" * 20_000
+
+
 @pytest.mark.parametrize(
     ("value", "placeholder"),
     [
@@ -43,11 +46,12 @@ def test_max_length_set_by_the_app_is_used():
         (GITHUB_TOKEN, "[GITHUB_TOKEN]"),
         (PRIVATE_KEY, "[PRIVATE_KEY]"),
         ("correct-horse-battery-staple", "[DB_PASSWORD]"),
+        (LONG_KNOWN_VALUE, "[DB_PASSWORD]"),
     ],
 )
 def test_a_value_sitting_across_the_limit_is_found_and_no_part_of_it_comes_back(value, placeholder):
     redact = Redactor(
-        detectors=[known_values("DB_PASSWORD", ["correct-horse-battery-staple"])],
+        detectors=[known_values("DB_PASSWORD", ["correct-horse-battery-staple", LONG_KNOWN_VALUE])],
         max_length=10,
     )
     cleaned = redact(f"user: {value} and more after")
@@ -73,11 +77,12 @@ def test_a_pair_sitting_across_the_limit_is_hidden_and_no_part_of_the_value_come
     assert redact("password=hunter2 and more") == "password=[REDACTED][TRUNCATED]"
 
 
-def test_a_url_password_sitting_across_the_limit_is_hidden_and_no_part_of_it_comes_back():
+@pytest.mark.parametrize("password", ["hunter2", "s" * 20_000])
+def test_a_url_password_sitting_across_the_limit_is_hidden_and_no_part_of_it_comes_back(password):
     redact = Redactor(max_length=18)
 
     assert (
-        redact("postgres://bob:hunter2@db.example.com/app")
+        redact(f"postgres://bob:{password}@db.example.com/app")
         == "postgres://bob:[URL_PASSWORD][TRUNCATED]"
     )
 
@@ -88,7 +93,7 @@ def test_a_value_completely_past_the_limit_is_dropped_without_leaving_a_placehol
     assert redact("0123456789 bob@example.com") == "0123456789[TRUNCATED]"
 
 
-def test_detectors_do_not_receive_text_past_the_limit_and_key_margin():
+def test_detectors_do_not_receive_text_past_the_limit_and_longest_value():
     seen = []
 
     def spy(text):
@@ -98,7 +103,7 @@ def test_detectors_do_not_receive_text_past_the_limit_and_key_margin():
     redact = Redactor(detectors=[spy], max_length=100)
     redact("a" * 200_000)
 
-    assert seen == [100 + 16 * 1024]
+    assert seen == [100 + DEFAULT_LIMIT]
 
 
 def test_a_nested_value_longer_than_the_limit_is_cut_and_marked_truncated():
