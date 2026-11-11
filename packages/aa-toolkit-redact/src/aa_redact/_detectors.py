@@ -31,23 +31,30 @@ def _known_regex(part: str) -> str:
     return _UNICODE_ESCAPE.sub(r"\\u(?i:\1)", escaped)
 
 
+def _json_escape(parts: Iterable[str], *, ensure_ascii: bool) -> list[str]:
+    return [json.dumps(part, ensure_ascii=ensure_ascii)[1:-1] for part in parts]
+
+
 def _known_forms(value: str) -> Iterator[tuple[int, str]]:
     """Yield `(length, regex)` for a Known value as written, URL-encoded and JSON-escaped."""
-    for chars in (
+    for url_parts in (
         list(value),
-        [urllib.parse.quote(ch, safe="") for ch in value],
-        [urllib.parse.quote(ch) for ch in value],
-        [urllib.parse.quote_plus(ch) for ch in value],
+        [urllib.parse.quote(character, safe="") for character in value],
+        [urllib.parse.quote(character) for character in value],
+        [urllib.parse.quote_plus(character) for character in value],
     ):
         for ensure_ascii in (True, False):
-            escaped = [json.dumps(ch, ensure_ascii=ensure_ascii)[1:-1] for ch in chars]
+            escaped = _json_escape(url_parts, ensure_ascii=ensure_ascii)
             for parts in (
-                chars,
+                url_parts,
                 escaped,
-                [ch.replace("/", r"\/") for ch in escaped],
-                [json.dumps(ch, ensure_ascii=ensure_ascii)[1:-1] for ch in escaped],
+                [part.replace("/", r"\/") for part in escaped],
+                _json_escape(escaped, ensure_ascii=ensure_ascii),
             ):
-                yield sum(len(ch) for ch in parts), "".join(_known_regex(ch) for ch in parts)
+                yield (
+                    sum(len(part) for part in parts),
+                    "".join(_known_regex(part) for part in parts),
+                )
 
 
 def known_values(kind: str, values: Iterable[str]) -> Detector:
