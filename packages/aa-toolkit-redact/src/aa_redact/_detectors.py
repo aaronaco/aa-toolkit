@@ -22,13 +22,13 @@ def pattern(kind: str, regex: str) -> Detector:
 
 
 _PERCENT_ESCAPE = re.compile(r"%[0-9A-Fa-f]{2}")
-_UNICODE_ESCAPE = re.compile(r"(\\+u)([0-9a-f]{4})")
+_UNICODE_ESCAPE = re.compile(r"\\u([0-9a-f]{4})")
 
 
 def _known_regex(part: str) -> str:
     """Escape one encoded character for regex, matching its hex escapes in either case."""
     escaped = _PERCENT_ESCAPE.sub(lambda match: f"(?i:{match[0]})", re.escape(part))
-    return _UNICODE_ESCAPE.sub(r"\1(?i:\2)", escaped)
+    return _UNICODE_ESCAPE.sub(r"\\u(?i:\1)", escaped)
 
 
 def _known_forms(value: str) -> Iterator[tuple[int, str]]:
