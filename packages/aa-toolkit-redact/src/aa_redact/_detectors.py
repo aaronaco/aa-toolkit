@@ -2,9 +2,11 @@
 
 import bisect
 import ipaddress
+import json
 import re
 import unicodedata
-from collections.abc import Callable, Iterator
+import urllib.parse
+from collections.abc import Callable, Iterable, Iterator
 
 from aa_redact._finding import LONGEST_VALUE, Detector, Finding
 
@@ -15,6 +17,70 @@ def pattern(kind: str, regex: str) -> Detector:
 
     def detect(text: str) -> list[Finding]:
         return [Finding(kind, *match.span()) for match in compiled.finditer(text) if match[0]]
+
+    return detect
+
+
+_PERCENT_ESCAPE = re.compile(r"%[0-9A-Fa-f]{2}")
+_UNICODE_ESCAPE = re.compile(r"\\u([0-9a-f]{4})")
+
+
+def _known_regex(part: str) -> str:
+    """Escape one encoded character for regex, matching its hex escapes in either case."""
+    escaped = _PERCENT_ESCAPE.sub(lambda match: f"(?i:{match[0]})", re.escape(part))
+    return _UNICODE_ESCAPE.sub(r"\\u(?i:\1)", escaped)
+
+
+def _json_escape(parts: Iterable[str], *, ensure_ascii: bool) -> list[str]:
+    """Escape each character part the way `json.dumps` writes it inside quotes."""
+    return [json.dumps(part, ensure_ascii=ensure_ascii)[1:-1] for part in parts]
+
+
+def _known_forms(value: str) -> Iterator[tuple[int, str]]:
+    """Yield `(length, regex)` for a Known value as written, URL-encoded and JSON-escaped."""
+    for url_parts in (
+        list(value),
+        [urllib.parse.quote(character, safe="") for character in value],
+        [urllib.parse.quote(character) for character in value],
+        [urllib.parse.quote_plus(character) for character in value],
+    ):
+        for ensure_ascii in (True, False):
+            escaped = _json_escape(url_parts, ensure_ascii=ensure_ascii)
+            for parts in (
+                url_parts,
+                escaped,
+                [part.replace("/", r"\/") for part in escaped],
+                _json_escape(escaped, ensure_ascii=ensure_ascii),
+            ):
+                yield (
+                    sum(len(part) for part in parts),
+                    "".join(_known_regex(part) for part in parts),
+                )
+
+
+def known_values(kind: str, values: Iterable[str]) -> Detector:
+    """Make a Detector that finds the exact values an app already holds."""
+    if isinstance(values, str):
+        raise TypeError(f"values takes a list, like [{values!r}]")
+    forms = [
+        regex
+        for _, regex in sorted(
+            {form for value in values if value for form in _known_forms(value)},
+            reverse=True,
+        )
+    ]
+    if not forms:
+        return lambda text: ()
+    compiled = re.compile("|".join(forms))
+
+    def detect(text: str) -> Iterator[Finding]:
+        position = 0
+        end = 0
+        while match := compiled.search(text, position):
+            if match.end() > end:
+                end = match.end()
+                yield Finding(kind, *match.span())
+            position = match.start() + 1
 
     return detect
 

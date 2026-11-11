@@ -5,10 +5,11 @@ from numbers import Number
 from typing import overload
 
 from aa_redact._detectors import BUILT_IN
-from aa_redact._finding import Detector, Finding
+from aa_redact._finding import LONGEST_VALUE, Detector, Finding
 from aa_redact._names import HIDDEN_KIND, SensitiveNames
 
 _HIDDEN = f"[{HIDDEN_KIND}]"
+_TRUNCATED = "[TRUNCATED]"
 _MAX_DEPTH = 32  # far past real data, and well inside Python's recursion limit
 _SHAPES = (list, tuple, set, frozenset)
 
@@ -75,7 +76,7 @@ def _shown_as(value: object) -> str | None:
 class Redactor:
     """Cleans any value, leaving a Placeholder such as [EMAIL] where each sensitive one was."""
 
-    __slots__ = ("_detectors", "_names")
+    __slots__ = ("_detectors", "_max_length", "_names")
 
     def __init__(
         self,
@@ -84,12 +85,17 @@ class Redactor:
         names: Iterable[str] = (),
         without: Iterable[str] = (),
         allow_names: Iterable[str] = (),
+        max_length: int = LONGEST_VALUE,
     ) -> None:
+        """Set up the Detectors, Sensitive names and size limit this Redactor uses."""
+        if isinstance(max_length, bool) or not isinstance(max_length, int) or max_length < 1:
+            raise ValueError(f"max_length= must be at least 1, not {max_length!r}")
         off = set(_listed("without", without))
         built_in = (detector for kind, detector in BUILT_IN.items() if kind not in off)
         self._names = SensitiveNames(_listed("names", names), _listed("allow_names", allow_names))
         # Sensitive names come first, so they win a tie with an equally long Finding.
         self._detectors = (self._names.find_values, *built_in, *detectors)
+        self._max_length = max_length
 
     @overload
     def __call__(self, value: str) -> str: ...
@@ -141,4 +147,14 @@ class Redactor:
         return self._clean(item, parents)
 
     def _clean_text(self, text: str) -> str:
-        return _replace(text, _find(text, self._detectors))
+        """Replace every found value in text, cutting text over the limit at `max_length`."""
+        limit = self._max_length
+        if len(text) <= limit:
+            return _replace(text, _find(text, self._detectors))
+        findings = [
+            finding
+            for finding in _find(text[: limit + LONGEST_VALUE], self._detectors)
+            if finding.start < limit
+        ]
+        # A Finding that runs past `limit` leaves `done >= limit`, so the tail after it is empty.
+        return _replace(text[:limit], findings) + _TRUNCATED
