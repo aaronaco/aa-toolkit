@@ -3,7 +3,7 @@ name = "aa-toolkit"
 version = "0.0.0"
 description = "Workspace root of the aa toolkit."
 requires-python = ">=3.14"
-dependencies = ["aa-toolkit-cli", "aa-toolkit-log", "aa-toolkit-redact"]
+dependencies = ["aa-toolkit-cli", "aa-toolkit-log", "aa-toolkit-redact", "aa-toolkit-settings"]
 
 [tool.uv]
 package = false
@@ -17,6 +17,7 @@ members = ["packages/*"]
 aa-toolkit-cli = { workspace = true }
 aa-toolkit-log = { workspace = true }
 aa-toolkit-redact = { workspace = true }
+aa-toolkit-settings = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -34,6 +35,7 @@ testpaths = [
     "packages/aa-toolkit-cli/tests",
     "packages/aa-toolkit-log/tests",
     "packages/aa-toolkit-redact/tests",
+    "packages/aa-toolkit-settings/tests",
 ]
 addopts = ["--import-mode=importlib"]
 
@@ -52,16 +54,16 @@ select = ["E", "F", "W", "I", "UP", "B", "ANN", "PYI", "S"]
 "packages/*/tests/**" = ["ANN", "S101", "S603", "S607"]  # tests assert and run git and uv by name
 
 [tool.ruff.lint.isort]
-known-first-party = ["aa_cli", "aa_log", "aa_redact"]
+known-first-party = ["aa_cli", "aa_log", "aa_redact", "aa_settings"]
 
 # ADR 0001: a library never imports another library. The CLI may import them, so it isn't listed.
 [tool.importlinter]
-root_packages = ["aa_log", "aa_redact"]
+root_packages = ["aa_log", "aa_redact", "aa_settings"]
 
 [[tool.importlinter.contracts]]
 name = "Libraries don't import each other"
 type = "independence"
-modules = ["aa_log", "aa_redact"]
+modules = ["aa_log", "aa_redact", "aa_settings"]
 
 [tool.ty.analysis]
 respect-type-ignore-comments = false
