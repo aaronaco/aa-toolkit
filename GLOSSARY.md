@@ -40,6 +40,22 @@ _Avoid_: mask, token
 One sensitive value found in a text, given by its kind and where it sits, never by the value itself.
 _Avoid_: match, hit, detection
 
+**Settings library**:
+The library that gives an app its Settings from the environment, a `.env` file, the Secret store and defaults, in that order.
+_Avoid_: config library, vault, configuration
+
+**Setting**:
+One named value an app reads when it starts, such as a database URL.
+_Avoid_: config value, option, variable
+
+**Secret**:
+A Setting whose value is never shown: wherever it would appear, `[REDACTED]` appears instead.
+_Avoid_: credential, password (when you mean any Secret), sensitive setting
+
+**Secret store**:
+The place the operating system keeps secrets for the signed-in user, such as Windows Credential Manager.
+_Avoid_: vault, keyring, keychain, wallet
+
 **App**:
 A program someone runs, as opposed to a library that other code imports. An app decides how its logs look and where they go.
 _Avoid_: program, service
