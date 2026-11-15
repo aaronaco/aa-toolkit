@@ -244,6 +244,26 @@ That prints:
 order 4521 for bob.smith@example.com
 ```
 
+## Find without replacing
+
+Call `find()` with text to get the Findings the `Redactor` would replace, in text order, without changing the text. Each `Finding` gives its `kind`, `start` and `end`, and never the value itself:
+
+```python
+from aa_redact import Redactor
+
+redact = Redactor()
+
+print(redact.find("mail jane@corp.com password=hunter2"))
+```
+
+That prints:
+
+```text
+[Finding(kind='EMAIL', start=5, end=18), Finding(kind='REDACTED', start=28, end=35)]
+```
+
+`find()` takes text only and follows the same Detectors, Sensitive names, Known values, `without=`, `allow_names=` and `max_length=` rules as replacing.
+
 ## Size limit
 
 Text longer than `max_length`, 64 KB (`65536` characters) by default per value, is cut at the limit and ends with `[TRUNCATED]`. Detectors run on the limit plus a 64 KB margin (`LONGEST_VALUE`) so a value that sits across the cut is still found and no part of it comes back. Text past the cut is never returned.

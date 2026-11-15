@@ -106,6 +106,19 @@ class Redactor:
     def __call__(self, value: object) -> object:
         return self._clean(value, set())
 
+    def find(self, text: str) -> list[Finding]:
+        """Return every Finding this Redactor would replace in `text`, in text order."""
+        if not isinstance(text, str):
+            raise TypeError(f"find() takes text (str), not {type(text).__name__}")
+        limit = self._max_length
+        if len(text) <= limit:
+            return _find(text, self._detectors)
+        return [
+            finding
+            for finding in _find(text[: limit + LONGEST_VALUE], self._detectors)
+            if finding.start < limit
+        ]
+
     def _clean(self, value: object, parents: set[int]) -> object:
         """Clean one value. `parents` holds the structures this value sits inside."""
         if _holds_no_secret(value):
@@ -148,13 +161,9 @@ class Redactor:
 
     def _clean_text(self, text: str) -> str:
         """Replace every found value in text, cutting text over the limit at `max_length`."""
+        findings = self.find(text)
         limit = self._max_length
         if len(text) <= limit:
-            return _replace(text, _find(text, self._detectors))
-        findings = [
-            finding
-            for finding in _find(text[: limit + LONGEST_VALUE], self._detectors)
-            if finding.start < limit
-        ]
+            return _replace(text, findings)
         # A Finding that runs past `limit` leaves `done >= limit`, so the tail after it is empty.
         return _replace(text[:limit], findings) + _TRUNCATED
