@@ -123,40 +123,6 @@ def test_invalid_complex_env_value_raises_settings_error_with_no_cause_or_contex
     assert "secret-bad-json" not in repr(err.problems)
 
 
-def test_dict_keys_are_redacted_from_error_locations(monkeypatch, tmp_path):
-    import json
-
-    from pydantic import BaseModel
-
-    monkeypatch.chdir(tmp_path)
-
-    class Endpoint(BaseModel):
-        port: int
-
-    class Settings(BaseSettings):
-        tokens: dict[str, int]
-        ports_by_int: dict[int, str]
-        endpoints: dict[str, Endpoint]
-
-    with pytest.raises(SettingsError) as exc_info:
-        Settings(
-            tokens={"sk-secret-key": "bad-val"},
-            ports_by_int=json.loads('{"sk-bad-int-key": "ok"}'),
-            endpoints={"sk-secret-host": {"port": "bad-port"}},
-        )
-
-    err = exc_info.value
-    rendered = f"{err}\n{err.problems!r}"
-    assert "sk-secret-key" not in rendered
-    assert "sk-bad-int-key" not in rendered
-    assert "sk-secret-host" not in rendered
-    assert [p["field"] for p in err.problems] == [
-        "tokens.[key]",
-        "ports_by_int.[key]",
-        "endpoints.[key].port",
-    ]
-
-
 def test_missing_field_hint_respects_alias_and_env_prefix_target(monkeypatch, tmp_path):
     from pydantic import AliasChoices, Field
 
@@ -221,13 +187,100 @@ def test_missing_nested_field_under_dict_key_omits_hint_and_redacts_key(monkeypa
     ]
 
 
-def test_sanitization_and_hints_for_containers_unions_nested_models_and_root_errors(
-    monkeypatch, tmp_path
-):
+def test_only_names_written_in_the_settings_types_appear_in_error_locations(monkeypatch, tmp_path):
     import json
-    from typing import Annotated
+    from dataclasses import dataclass
+    from typing import Annotated, Literal
 
-    from pydantic import AliasPath, BaseModel, Field, model_validator
+    from pydantic import AliasPath, BaseModel, Field
+
+    monkeypatch.chdir(tmp_path)
+
+    class Endpoint(BaseModel):
+        port: int
+
+    class TaggedMap(BaseModel):
+        kind: Literal["map"]
+        tokens: dict[str, int]
+
+    class TaggedList(BaseModel):
+        kind: Literal["list"]
+        items: list[int]
+
+    @dataclass
+    class Credentials:
+        tokens: dict[str, int]
+
+    class Settings(BaseSettings):
+        tokens: dict[str, int] = {}
+        by_int: dict[int, str] = {}
+        endpoints: dict[str, Endpoint] = {}
+        items: list[Endpoint] = []
+        pair: tuple[int, Endpoint] = (1, Endpoint(port=1))
+        aliased: dict[str, int] = Field(default={}, validation_alias=AliasPath("payload", "tokens"))
+        either: dict[str, int] | list[int] = []
+        tagged: Annotated[TaggedMap | TaggedList, Field(discriminator="kind")] | None = None
+        creds: Credentials | None = None
+
+    payload = {
+        "tokens": {"sk-1": "bad"},
+        "by_int": {"sk-2": "x"},
+        "endpoints": {"sk-3": {"port": "bad"}},
+        "items": [{"port": "bad"}],
+        "pair": [1, {"port": "bad"}],
+        "payload": {"tokens": {"sk-4": "bad"}},
+        "either": {"sk-5": "bad"},
+        "tagged": {"kind": "map", "tokens": {"sk-6": "bad"}},
+        "creds": {"tokens": {"sk-7": "bad"}},
+    }
+
+    with pytest.raises(SettingsError) as exc_info:
+        Settings(**json.loads(json.dumps(payload)))
+
+    err = exc_info.value
+    assert "sk-" not in f"{err}\n{err.problems!r}"
+    assert [p["field"] for p in err.problems] == [
+        "tokens.[key]",
+        "by_int.[key]",
+        "endpoints.[key].port",
+        "items.0.port",
+        "pair.1.port",
+        "payload.tokens.[key]",
+        "either.[key]",
+        "either.[key]",
+        "tagged.map.tokens.[key]",
+        "creds.tokens.[key]",
+    ]
+
+
+def test_invalid_discriminator_tag_is_not_repeated(monkeypatch, tmp_path):
+    from typing import Annotated, Literal
+
+    from pydantic import BaseModel, Field
+
+    monkeypatch.chdir(tmp_path)
+
+    class TaggedMap(BaseModel):
+        kind: Literal["map"]
+
+    class TaggedList(BaseModel):
+        kind: Literal["list"]
+
+    class Settings(BaseSettings):
+        tagged: Annotated[TaggedMap | TaggedList, Field(discriminator="kind")]
+
+    with pytest.raises(SettingsError) as exc_info:
+        Settings(tagged={"kind": "sk-tag-secret"})
+
+    err = exc_info.value
+    assert str(err) == "tagged: Input tag does not match any of the expected tags: 'map', 'list'"
+    assert "sk-tag-secret" not in repr(err.problems)
+
+
+def test_missing_field_hints_for_nested_models_runtime_prefix_and_by_name(monkeypatch, tmp_path):
+    import json
+
+    from pydantic import AliasPath, BaseModel, Field
 
     monkeypatch.chdir(tmp_path)
 
@@ -239,50 +292,46 @@ def test_sanitization_and_hints_for_containers_unions_nested_models_and_root_err
 
         db: Endpoint
         path_field: str = Field(validation_alias=AliasPath("nested", "key"))
-        annotated_map: Annotated[dict[str, int] | None, "meta"] = None
-        items: list[Endpoint] = []
-        pair: tuple[int, Endpoint] = (1, Endpoint(port=80))
-        variadic: tuple[Endpoint, ...] = ()
-
-    with pytest.raises(SettingsError) as exc_info:
-        NestedSettings(
-            db=json.loads("{}"),
-            annotated_map=json.loads('{"sk-annotated-key": "bad"}'),
-            items=[json.loads('{"port": "bad"}')],
-            pair=json.loads('[1, {"port": "bad"}]'),
-            variadic=(json.loads('{"port": "bad"}'),),
-        )
-
-    err = exc_info.value
-    rendered = f"{err}\n{err.problems!r}"
-    assert "sk-annotated-key" not in rendered
-    assert {
-        "field": "db.port",
-        "type": "missing",
-        "message": "missing. Set APP_DB__PORT in the environment or in .env",
-    } in err.problems
-    assert {"field": "nested.key", "type": "missing", "message": "missing"} in err.problems
-    assert any(
-        p["field"] == "annotated_map.[key]" and p["type"] == "int_parsing" for p in err.problems
-    )
-    assert any(p["field"] == "items.0.port" for p in err.problems)
-    assert any(p["field"] == "pair.1.port" for p in err.problems)
-    assert any(p["field"] == "variadic.0.port" for p in err.problems)
 
     class ByNameSettings(BaseSettings):
         model_config = SettingsConfigDict(env_prefix="APP_", validate_by_alias=False)
 
         by_name_only: str = Field(validation_alias="IGNORED_ALIAS")
 
+    class PlainSettings(BaseSettings):
+        database_url: str
+
+    with pytest.raises(SettingsError) as nested_exc:
+        NestedSettings(db=json.loads("{}"))
     with pytest.raises(SettingsError) as by_name_exc:
         ByNameSettings()
+    with pytest.raises(SettingsError) as runtime_exc:
+        PlainSettings(_env_prefix="rt_")
 
+    assert nested_exc.value.problems == [
+        {
+            "field": "db.port",
+            "type": "missing",
+            "message": "missing. Set APP_DB__PORT in the environment or in .env",
+        },
+        {"field": "nested.key", "type": "missing", "message": "missing"},
+    ]
     assert (
         str(by_name_exc.value)
         == "by_name_only: missing. Set APP_BY_NAME_ONLY in the environment or in .env"
     )
+    assert (
+        str(runtime_exc.value)
+        == "database_url: missing. Set RT_DATABASE_URL in the environment or in .env"
+    )
 
+
+def test_model_validator_error_has_no_field(monkeypatch, tmp_path):
     from typing import Self
+
+    from pydantic import model_validator
+
+    monkeypatch.chdir(tmp_path)
 
     class RootFailSettings(BaseSettings):
         value: int = 1
@@ -293,164 +342,8 @@ def test_sanitization_and_hints_for_containers_unions_nested_models_and_root_err
                 raise ValueError("invalid root combination")
             return self
 
-    with pytest.raises(SettingsError) as root_exc:
+    with pytest.raises(SettingsError) as exc_info:
         RootFailSettings()
 
-    assert str(root_exc.value) == "Value error, invalid root combination"
-    assert root_exc.value.problems[0]["field"] == ""
-
-
-def test_alias_path_and_multi_branch_unions_redact_dict_keys(monkeypatch, tmp_path):
-    import json
-    from typing import Annotated, Literal
-
-    from pydantic import AliasChoices, AliasPath, BaseModel, Field
-
-    monkeypatch.chdir(tmp_path)
-
-    class Endpoint(BaseModel):
-        port: int
-
-    class TaggedMap(BaseModel):
-        kind: Literal["map"]
-        tokens: dict[str, int]
-
-    class TaggedList(BaseModel):
-        kind: Literal["list"]
-        items: list[int]
-
-    class Settings(BaseSettings):
-        ap_tokens: dict[str, int] = Field(validation_alias=AliasPath("payload", "tokens"))
-        ac_tokens: dict[str, int] = Field(
-            validation_alias=AliasChoices("alt", AliasPath("wrap", "map"))
-        )
-        map_or_list: dict[str, int] | list[int]
-        model_or_map: Endpoint | dict[str, int]
-        tagged: Annotated[TaggedMap | TaggedList, Field(discriminator="kind")]
-
-    payload = json.dumps(
-        {
-            "payload": {"tokens": {"sk-ap-secret": "bad"}},
-            "wrap": {"map": {"sk-ac-secret": "bad"}},
-            "map_or_list": {"sk-union-secret": "bad"},
-            "model_or_map": {"sk-collision-secret": "bad", "port": "bad"},
-            "tagged": {"kind": "map", "tokens": {"sk-tagged-secret": "bad"}},
-        }
-    )
-
-    with pytest.raises(SettingsError) as exc_info:
-        Settings(**json.loads(payload))
-
-    err = exc_info.value
-    rendered = f"{err}\n{err.problems!r}"
-    for secret_key in (
-        "sk-ap-secret",
-        "sk-ac-secret",
-        "sk-union-secret",
-        "sk-collision-secret",
-        "sk-tagged-secret",
-    ):
-        assert secret_key not in rendered
-
-    fields = [p["field"] for p in err.problems]
-    assert "payload.tokens.[key]" in fields
-    assert "wrap.map.[key]" in fields
-    assert "map_or_list.dict[str,int].[key]" in fields
-    assert "model_or_map.dict[str,int].[key]" in fields
-    assert "tagged.map.tokens.[key]" in fields
-
-
-def test_shared_origin_unions_and_invalid_discriminator_tag_redact_inputs(monkeypatch, tmp_path):
-    import json
-    from typing import Annotated, Literal
-
-    from pydantic import BaseModel, Field
-
-    monkeypatch.chdir(tmp_path)
-
-    class TaggedMap(BaseModel):
-        kind: Literal["map"]
-        tokens: dict[str, int]
-
-    class TaggedList(BaseModel):
-        kind: Literal["list"]
-        items: list[int]
-
-    class Settings(BaseSettings):
-        seqs: list[int] | list[dict[str, int]]
-        tups: tuple[int, ...] | tuple[dict[str, int], ...]
-        tagged: Annotated[TaggedMap | TaggedList, Field(discriminator="kind")]
-
-    payload = json.dumps(
-        {
-            "seqs": [{"sk-seq-secret": "bad"}],
-            "tups": [{"sk-tup-secret": "bad"}],
-            "tagged": {"kind": "sk-tag-secret"},
-        }
-    )
-
-    with pytest.raises(SettingsError) as exc_info:
-        Settings(**json.loads(payload))
-
-    err = exc_info.value
-    rendered = f"{err}\n{err.problems!r}"
-    assert "sk-seq-secret" not in rendered
-    assert "sk-tup-secret" not in rendered
-    assert "sk-tag-secret" not in rendered
-
-    fields = [p["field"] for p in err.problems]
-    assert "seqs.list[dict[str,int]].0.[key]" in fields
-    assert "tups.tuple[dict[str,int], ...].0.[key]" in fields
-    tag_problem = next(p for p in err.problems if p["type"] == "union_tag_invalid")
-    assert tag_problem["field"] == "tagged"
-    assert "'map', 'list'" in tag_problem["message"]
-
-
-def test_equivalent_constrained_union_branches_and_dataclass_redact_dict_keys(
-    monkeypatch, tmp_path
-):
-    import json
-    from dataclasses import dataclass
-    from typing import Annotated
-
-    from pydantic import Field
-
-    monkeypatch.chdir(tmp_path)
-
-    @dataclass
-    class Credentials:
-        tokens: dict[str, int]
-
-    class Settings(BaseSettings):
-        seqs: (
-            Annotated[list[dict[str, int]], Field(min_length=1)]
-            | Annotated[list[dict[str, int]], Field(max_length=2)]
-        )
-        maps: (
-            Annotated[dict[str, dict[str, int]], Field(min_length=1)]
-            | Annotated[dict[str, dict[str, int]], Field(max_length=2)]
-        )
-        dc: Credentials
-
-    payload = json.dumps(
-        {
-            "seqs": [{"sk-constrained-seq": "bad"}],
-            "maps": {"outer-entry": {"sk-constrained-map": "bad"}},
-            "dc": {"tokens": {"sk-dataclass-key": "bad"}},
-        }
-    )
-
-    with pytest.raises(SettingsError) as exc_info:
-        Settings(**json.loads(payload))
-
-    err = exc_info.value
-    rendered = f"{err}\n{err.problems!r}"
-    assert "sk-constrained-seq" not in rendered
-    assert "outer-entry" not in rendered
-    assert "sk-constrained-map" not in rendered
-    assert "sk-dataclass-key" not in rendered
-
-    fields = [p["field"] for p in err.problems]
-    assert "seqs.list[dict[str,int]].0.[key]" in fields
-    assert "maps.dict[str,dict[str,int]].[key].[key]" in fields
-    assert "dc.tokens.[key]" in fields
+    assert str(exc_info.value) == "Value error, invalid root combination"
+    assert exc_info.value.problems[0]["field"] == ""

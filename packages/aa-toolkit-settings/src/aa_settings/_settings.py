@@ -1,6 +1,6 @@
 """Settings base class and SettingsConfigDict."""
 
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 from pydantic import ValidationError
 from pydantic_settings import BaseSettings as PydanticBaseSettings
@@ -12,6 +12,9 @@ from aa_settings._errors import (
     build_settings_error_from_source,
     build_settings_error_from_validation,
 )
+
+# Options an app can also pass when creating Settings, as `Settings(_env_prefix="APP_")`.
+_RUNTIME_OPTIONS = ("env_prefix", "env_prefix_target", "case_sensitive", "env_nested_delimiter")
 
 
 class SettingsConfigDict(PydanticSettingsConfigDict, total=False):
@@ -36,30 +39,16 @@ class BaseSettings(PydanticBaseSettings):
         try:
             super().__init__(**values)
         except ValidationError as exc:
-            config = type(self).model_config
-            env_prefix = values.get("_env_prefix")
-            if env_prefix is None:
-                env_prefix = config.get("env_prefix", "")
-            case_sensitive = values.get("_case_sensitive")
-            if case_sensitive is None:
-                case_sensitive = config.get("case_sensitive", False)
-            env_nested_delimiter = values.get("_env_nested_delimiter")
-            if env_nested_delimiter is None:
-                env_nested_delimiter = config.get("env_nested_delimiter")
-            env_prefix_target = values.get("_env_prefix_target")
-            if env_prefix_target is None:
-                env_prefix_target = config.get("env_prefix_target", "variable")
-            validate_by_alias = config.get("validate_by_alias", True)
-            error = build_settings_error_from_validation(
-                exc,
-                env_prefix=env_prefix,
-                case_sensitive=bool(case_sensitive),
-                env_nested_delimiter=env_nested_delimiter,
-                settings_cls=type(self),
-                env_prefix_target=str(env_prefix_target),
-                validate_by_alias=bool(validate_by_alias),
-            )
+            overrides = {
+                key: values[f"_{key}"]
+                for key in _RUNTIME_OPTIONS
+                if values.get(f"_{key}") is not None
+            }
+            config = cast("SettingsConfigDict", {**type(self).model_config, **overrides})
+            error = build_settings_error_from_validation(exc, type(self), config)
         except PydanticSettingsError as exc:
             error = build_settings_error_from_source(exc)
+        # Raised here, outside the except blocks, so pydantic's error is neither
+        # the cause nor the context and its input values stay out of tracebacks.
         if error is not None:
             raise error

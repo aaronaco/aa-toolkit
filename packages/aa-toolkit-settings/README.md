@@ -68,6 +68,8 @@ database_url: missing. Set DATABASE_URL in the environment or in .env
 port: Input should be a valid integer, unable to parse string as an integer
 ```
 
+A field path shows only names written in your Settings classes, so a dict key from the input shows as `[key]`, as in `tokens.[key]`. The one exception to "no input values" is your own validators: their messages are kept as written (see [What this library can't do](#what-this-library-cant-do)).
+
 ## Where values come from
 
 Each Setting is taken from the first place that has it:
