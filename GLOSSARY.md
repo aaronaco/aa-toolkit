@@ -49,7 +49,7 @@ One named value an app reads when it starts, such as a database URL.
 _Avoid_: config value, option, variable
 
 **Secret**:
-A Setting whose value is never shown: wherever it would appear, `[REDACTED]` appears instead.
+A Setting that shows as `[REDACTED]` wherever it's printed, logged or saved. Only code that asks for its real value gets it, and that code has to keep it hidden itself.
 _Avoid_: credential, password (when you mean any Secret), sensitive setting
 
 **Secret store**:
