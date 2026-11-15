@@ -404,3 +404,53 @@ def test_shared_origin_unions_and_invalid_discriminator_tag_redact_inputs(monkey
     tag_problem = next(p for p in err.problems if p["type"] == "union_tag_invalid")
     assert tag_problem["field"] == "tagged"
     assert "'map', 'list'" in tag_problem["message"]
+
+
+def test_equivalent_constrained_union_branches_and_dataclass_redact_dict_keys(
+    monkeypatch, tmp_path
+):
+    import json
+    from dataclasses import dataclass
+    from typing import Annotated
+
+    from pydantic import Field
+
+    monkeypatch.chdir(tmp_path)
+
+    @dataclass
+    class Credentials:
+        tokens: dict[str, int]
+
+    class Settings(BaseSettings):
+        seqs: (
+            Annotated[list[dict[str, int]], Field(min_length=1)]
+            | Annotated[list[dict[str, int]], Field(max_length=2)]
+        )
+        maps: (
+            Annotated[dict[str, dict[str, int]], Field(min_length=1)]
+            | Annotated[dict[str, dict[str, int]], Field(max_length=2)]
+        )
+        dc: Credentials
+
+    payload = json.dumps(
+        {
+            "seqs": [{"sk-constrained-seq": "bad"}],
+            "maps": {"outer-entry": {"sk-constrained-map": "bad"}},
+            "dc": {"tokens": {"sk-dataclass-key": "bad"}},
+        }
+    )
+
+    with pytest.raises(SettingsError) as exc_info:
+        Settings(**json.loads(payload))
+
+    err = exc_info.value
+    rendered = f"{err}\n{err.problems!r}"
+    assert "sk-constrained-seq" not in rendered
+    assert "outer-entry" not in rendered
+    assert "sk-constrained-map" not in rendered
+    assert "sk-dataclass-key" not in rendered
+
+    fields = [p["field"] for p in err.problems]
+    assert "seqs.list[dict[str,int]].0.[key]" in fields
+    assert "maps.dict[str,dict[str,int]].[key].[key]" in fields
+    assert "dc.tokens.[key]" in fields

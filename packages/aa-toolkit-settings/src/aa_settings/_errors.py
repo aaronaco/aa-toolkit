@@ -3,13 +3,26 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import fields as dataclass_fields
+from dataclasses import is_dataclass
 from types import UnionType
-from typing import TYPE_CHECKING, Annotated, Literal, TypedDict, Union, get_args, get_origin
+from typing import (
+    TYPE_CHECKING,
+    Annotated,
+    Literal,
+    TypedDict,
+    Union,
+    cast,
+    get_args,
+    get_origin,
+    get_type_hints,
+)
 
 from pydantic import AliasChoices, AliasPath, BaseModel
 from pydantic import Secret as PydanticSecret
 
 if TYPE_CHECKING:
+    from _typeshed import DataclassInstance
     from pydantic import ValidationError
     from pydantic.fields import FieldInfo
     from pydantic_settings.exceptions import SettingsError as PydanticSettingsError
@@ -34,6 +47,33 @@ def _unwrap_types(annotation: object) -> list[object]:
         args = get_args(annotation)
         return _unwrap_types(args[0]) if args else []
     return [annotation]
+
+
+def _dedup_objects(items: list[object]) -> list[object]:
+    result: list[object] = []
+    for item in items:
+        if item not in result:
+            result.append(item)
+    return result
+
+
+def _is_multi_branch_union(annotation: object) -> bool:
+    origin = get_origin(annotation)
+    if origin is Annotated or (isinstance(origin, type) and issubclass(origin, PydanticSecret)):
+        args = get_args(annotation)
+        return _is_multi_branch_union(args[0]) if args else False
+    if origin is Union or origin is UnionType:
+        non_none = [arg for arg in get_args(annotation) if arg is not type(None)]
+        return len(non_none) >= 2
+    return False
+
+
+def _expand_step_types(raw_types: list[object]) -> tuple[list[object], bool]:
+    expanded: list[object] = []
+    for item in raw_types:
+        expanded.extend(_unwrap_types(item))
+    in_union = any(_is_multi_branch_union(item) for item in raw_types)
+    return _dedup_objects(expanded), in_union
 
 
 def _match_alias_choice(choice: object, loc: tuple[int | str, ...], idx: int) -> int:
@@ -76,17 +116,33 @@ def _lookup_field_step(
     return None
 
 
+def _dataclass_field_type(dc_cls: type[object], field_name: str) -> object | None:
+    dc_type = cast("type[DataclassInstance]", dc_cls)
+    names = {field.name: field.type for field in dataclass_fields(dc_type)}
+    if field_name not in names:
+        return None
+    try:
+        hints = get_type_hints(dc_cls, include_extras=True)
+    except NameError, TypeError:
+        return names[field_name]
+    return hints.get(field_name, names[field_name])
+
+
 def _match_model_field(
     candidates: list[object],
     loc: tuple[int | str, ...],
     idx: int,
 ) -> tuple[int, list[object]] | None:
+    part = loc[idx]
     for cand in candidates:
         if isinstance(cand, type) and issubclass(cand, BaseModel):
             found = _lookup_field_step(cand, loc, idx)
             if found is not None:
-                _, field, consumed = found
-                return consumed, _unwrap_types(field.annotation)
+                return found[2], [found[1].annotation]
+        if isinstance(cand, type) and is_dataclass(cand) and isinstance(part, str):
+            dc_type = _dataclass_field_type(cand, part)
+            if dc_type is not None:
+                return 1, [dc_type]
     return None
 
 
@@ -138,9 +194,9 @@ def _select_union_branches(branches: list[object], label: int | str) -> list[obj
 
 def _tuple_element_types(args: tuple[object, ...], index: int) -> list[object]:
     if len(args) == 2 and args[1] is Ellipsis:
-        return _unwrap_types(args[0])
+        return [args[0]]
     if 0 <= index < len(args):
-        return _unwrap_types(args[index])
+        return [args[index]]
     return []
 
 
@@ -148,7 +204,7 @@ def _sequence_candidate_elements(cand: object, orig: type[object], index: int) -
     args = get_args(cand)
     if issubclass(orig, tuple):
         return _tuple_element_types(args, index)
-    return _unwrap_types(args[0]) if args else []
+    return [args[0]] if args else []
 
 
 def _match_sequence_element(candidates: list[object], index: int) -> list[object] | None:
@@ -175,7 +231,7 @@ def _match_mapping_value(candidates: list[object]) -> list[object] | None:
             matched_mapping = True
             args = get_args(cand)
             if len(args) >= 2:
-                map_val_candidates.extend(_unwrap_types(args[1]))
+                map_val_candidates.append(args[1])
     return map_val_candidates if matched_mapping else None
 
 
@@ -196,29 +252,28 @@ def _sanitize_loc_from_candidates(
 
     field_match = _match_model_field(candidates, loc, idx)
     if field_match is not None:
-        consumed, next_candidates = field_match
+        consumed, raw_next = field_match
+        next_candidates, next_union = _expand_step_types(raw_next)
         kept = list(loc[idx : idx + consumed])
         tail = _sanitize_loc_from_candidates(
-            loc, idx + consumed, next_candidates, in_union=len(next_candidates) > 1
+            loc, idx + consumed, next_candidates, in_union=next_union
         )
         return [*kept, *tail]
 
     if isinstance(part, int):
-        elem_candidates = _match_sequence_element(candidates, part)
-        if elem_candidates is not None:
-            tail = _sanitize_loc_from_candidates(
-                loc, idx + 1, elem_candidates, in_union=len(elem_candidates) > 1
-            )
+        raw_elems = _match_sequence_element(candidates, part)
+        if raw_elems is not None:
+            elem_candidates, elem_union = _expand_step_types(raw_elems)
+            tail = _sanitize_loc_from_candidates(loc, idx + 1, elem_candidates, in_union=elem_union)
             return [part, *tail]
 
-    map_candidates = _match_mapping_value(candidates)
-    if map_candidates is not None:
+    raw_maps = _match_mapping_value(candidates)
+    if raw_maps is not None:
+        map_candidates, map_union = _expand_step_types(raw_maps)
         next_idx = idx + 1
         if next_idx < len(loc) and loc[next_idx] == "[key]":
             next_idx += 1
-        tail = _sanitize_loc_from_candidates(
-            loc, next_idx, map_candidates, in_union=len(map_candidates) > 1
-        )
+        tail = _sanitize_loc_from_candidates(loc, next_idx, map_candidates, in_union=map_union)
         return ["[key]", *tail]
 
     return list(loc[idx:])

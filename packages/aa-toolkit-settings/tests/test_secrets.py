@@ -101,3 +101,27 @@ def test_secret_values_collects_nested_models_and_containers(monkeypatch, tmp_pa
     )
 
     assert secret_values(settings) == ["db-secret", "tok-1", "named-secret", "tuple-secret"]
+
+
+def test_secret_values_collects_dataclass_fields(monkeypatch, tmp_path):
+    from dataclasses import dataclass
+
+    monkeypatch.chdir(tmp_path)
+
+    @dataclass
+    class ServiceAuth:
+        api_key: Secret[str]
+        nested_tokens: list[Secret[str]]
+        plain: str = "visible"
+
+    class Settings(BaseSettings):
+        auth: ServiceAuth
+
+    settings = Settings(
+        auth=ServiceAuth(
+            api_key=Secret("dc-api-secret"),
+            nested_tokens=[Secret("dc-list-secret"), Secret("")],
+        )
+    )
+
+    assert secret_values(settings) == ["dc-api-secret", "dc-list-secret"]

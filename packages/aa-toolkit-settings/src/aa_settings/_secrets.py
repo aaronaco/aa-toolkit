@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+from dataclasses import fields as dataclass_fields
+from dataclasses import is_dataclass
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, SecretBytes, SecretStr
@@ -29,6 +31,8 @@ def _extract_secret_text(secret: PydanticSecret[object] | SecretStr | SecretByte
 def _iter_children(value: object) -> Iterable[object]:
     if isinstance(value, BaseModel):
         return (getattr(value, name) for name in type(value).model_fields)
+    if is_dataclass(value) and not isinstance(value, type):
+        return (getattr(value, field.name) for field in dataclass_fields(value))
     if isinstance(value, Mapping):
         return value.values()
     if isinstance(value, (list, tuple, set, frozenset)):
