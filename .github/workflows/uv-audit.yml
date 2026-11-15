@@ -21,6 +21,6 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@v10.3.3
         with:
-          version: "0.13.7"
+          version-file: pyproject.toml
       # --locked never changes uv.lock, and fails if it's out of date.
       - run: uv audit --locked --preview-features audit-command
