@@ -596,3 +596,43 @@ def test_delete_secret_raises_when_backend_refuses_but_entry_remains(memory_keyr
     assert exc_info.value.no_store is False
     assert exc_info.value.__context__ is None
     assert "still-here" not in str(exc_info.value)
+
+
+def test_reads_secrets_for_sibling_alias_path_list_indexes(memory_keyring, monkeypatch, tmp_path):
+    from pydantic import AliasPath, Field
+
+    monkeypatch.chdir(tmp_path)
+    memory_keyring.set_password("my-app", "first_key", "store-first")
+    memory_keyring.set_password("my-app", "second_key", "store-second")
+
+    class Settings(BaseSettings):
+        model_config = SettingsConfigDict(app_name="my-app")
+
+        first_key: Secret[str] = Field(validation_alias=AliasPath("keys", 0))
+        second_key: Secret[str] = Field(validation_alias=AliasPath("keys", 1))
+
+    settings = Settings()
+
+    assert settings.first_key.get_secret_value() == "store-first"
+    assert settings.second_key.get_secret_value() == "store-second"
+
+
+def test_secret_store_is_not_read_for_alias_path_index_set_in_a_tuple(
+    memory_keyring, monkeypatch, tmp_path
+):
+    from keyring.errors import KeyringError
+    from pydantic import AliasPath, Field
+
+    monkeypatch.chdir(tmp_path)
+
+    def broken_get(service: str, username: str) -> str | None:
+        raise KeyringError("store is broken")
+
+    memory_keyring.get_password = broken_get
+
+    class Settings(BaseSettings):
+        model_config = SettingsConfigDict(app_name="my-app")
+
+        first_key: Secret[str] = Field(validation_alias=AliasPath("keys", 0))
+
+    assert Settings(keys=("from-code",)).first_key.get_secret_value() == "from-code"

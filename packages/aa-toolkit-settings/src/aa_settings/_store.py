@@ -70,7 +70,11 @@ def _has_path(data: object, path: _Path) -> bool:
     for part in path:
         if isinstance(part, str) and isinstance(data, dict) and part in data:
             data = data[part]
-        elif isinstance(part, int) and isinstance(data, list) and -len(data) <= part < len(data):
+        elif (
+            isinstance(part, int)
+            and isinstance(data, (list, tuple))
+            and -len(data) <= part < len(data)
+        ):
             data = data[part]
         else:
             return False
@@ -90,13 +94,20 @@ def _nest(path: _Path, value: str) -> object:
     return nested
 
 
-def _merge(data: dict[str, Any], key: str, value: object) -> None:
-    current = data.get(key)
-    if isinstance(current, dict) and isinstance(value, dict):
-        for sub_key, sub_value in value.items():
-            _merge(current, sub_key, sub_value)
-    else:
-        data[key] = value
+def _combine(current: object, incoming: object) -> object:
+    """Merge two values built by `_nest`, keeping every filled key and list slot."""
+    if isinstance(current, dict) and isinstance(incoming, dict):
+        for key, value in incoming.items():
+            current[key] = _combine(current[key], value) if key in current else value
+        return current
+    if isinstance(current, list) and isinstance(incoming, list):
+        current.extend([None] * (len(incoming) - len(current)))
+        for index, value in enumerate(incoming):
+            if value is not None:
+                slot = current[index]
+                current[index] = value if slot is None else _combine(slot, value)
+        return current
+    return incoming
 
 
 def _read_secret(app_name: str, field_name: str) -> tuple[str | None, SettingsProblem | None, bool]:
@@ -145,7 +156,8 @@ class SecretStoreSettingsSource(PydanticBaseSettingsSource):
                 problems.append(problem)
                 continue
             if value is not None:
-                _merge(data, str(paths[0][0]), _nest(paths[0], value))
+                root, nested = str(paths[0][0]), _nest(paths[0], value)
+                data[root] = _combine(data[root], nested) if root in data else nested
         if problems:
             lines = [f"{p['field']}: {p['message']}" for p in problems]
             raise SettingsError("\n".join(lines), problems)
