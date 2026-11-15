@@ -358,3 +358,49 @@ def test_alias_path_and_multi_branch_unions_redact_dict_keys(monkeypatch, tmp_pa
     assert "map_or_list.dict[str,int].[key]" in fields
     assert "model_or_map.dict[str,int].[key]" in fields
     assert "tagged.map.tokens.[key]" in fields
+
+
+def test_shared_origin_unions_and_invalid_discriminator_tag_redact_inputs(monkeypatch, tmp_path):
+    import json
+    from typing import Annotated, Literal
+
+    from pydantic import BaseModel, Field
+
+    monkeypatch.chdir(tmp_path)
+
+    class TaggedMap(BaseModel):
+        kind: Literal["map"]
+        tokens: dict[str, int]
+
+    class TaggedList(BaseModel):
+        kind: Literal["list"]
+        items: list[int]
+
+    class Settings(BaseSettings):
+        seqs: list[int] | list[dict[str, int]]
+        tups: tuple[int, ...] | tuple[dict[str, int], ...]
+        tagged: Annotated[TaggedMap | TaggedList, Field(discriminator="kind")]
+
+    payload = json.dumps(
+        {
+            "seqs": [{"sk-seq-secret": "bad"}],
+            "tups": [{"sk-tup-secret": "bad"}],
+            "tagged": {"kind": "sk-tag-secret"},
+        }
+    )
+
+    with pytest.raises(SettingsError) as exc_info:
+        Settings(**json.loads(payload))
+
+    err = exc_info.value
+    rendered = f"{err}\n{err.problems!r}"
+    assert "sk-seq-secret" not in rendered
+    assert "sk-tup-secret" not in rendered
+    assert "sk-tag-secret" not in rendered
+
+    fields = [p["field"] for p in err.problems]
+    assert "seqs.list[dict[str,int]].0.[key]" in fields
+    assert "tups.tuple[dict[str,int], ...].0.[key]" in fields
+    tag_problem = next(p for p in err.problems if p["type"] == "union_tag_invalid")
+    assert tag_problem["field"] == "tagged"
+    assert "'map', 'list'" in tag_problem["message"]

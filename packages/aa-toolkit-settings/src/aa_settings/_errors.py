@@ -98,6 +98,23 @@ def _model_has_literal_tag(model_cls: type[BaseModel], tag: str) -> bool:
     return False
 
 
+def _annotation_label(annotation: object) -> str:
+    orig = get_origin(annotation) or annotation
+    if orig is Annotated:
+        args = get_args(annotation)
+        return _annotation_label(args[0]) if args else str(annotation)
+    if orig is Union or orig is UnionType:
+        return " | ".join(_annotation_label(arg) for arg in get_args(annotation))
+    if not isinstance(orig, type):
+        return str(annotation)
+    args = get_args(annotation)
+    if not args:
+        return orig.__name__
+    if issubclass(orig, tuple) and len(args) == 2 and args[1] is Ellipsis:
+        return f"tuple[{_annotation_label(args[0])}, ...]"
+    return f"{orig.__name__}[{','.join(_annotation_label(arg) for arg in args)}]"
+
+
 def _branch_matches_label(cand: object, label: str) -> bool:
     orig = get_origin(cand) or cand
     if isinstance(orig, type):
@@ -112,6 +129,9 @@ def _branch_matches_label(cand: object, label: str) -> bool:
 def _select_union_branches(branches: list[object], label: int | str) -> list[object]:
     if not isinstance(label, str):
         return branches
+    exact = [cand for cand in branches if _annotation_label(cand) == label]
+    if exact:
+        return exact
     matched = [cand for cand in branches if _branch_matches_label(cand, label)]
     return matched or branches
 
@@ -124,20 +144,26 @@ def _tuple_element_types(args: tuple[object, ...], index: int) -> list[object]:
     return []
 
 
+def _sequence_candidate_elements(cand: object, orig: type[object], index: int) -> list[object]:
+    args = get_args(cand)
+    if issubclass(orig, tuple):
+        return _tuple_element_types(args, index)
+    return _unwrap_types(args[0]) if args else []
+
+
 def _match_sequence_element(candidates: list[object], index: int) -> list[object] | None:
+    elem_candidates: list[object] = []
+    matched = False
     for cand in candidates:
         orig = get_origin(cand) or cand
-        if not (
+        if (
             isinstance(orig, type)
             and issubclass(orig, _SEQUENCE_ORIGINS)
             and not issubclass(orig, (str, bytes))
         ):
-            continue
-        args = get_args(cand)
-        if issubclass(orig, tuple):
-            return _tuple_element_types(args, index)
-        return _unwrap_types(args[0]) if args else []
-    return None
+            matched = True
+            elem_candidates.extend(_sequence_candidate_elements(cand, orig, index))
+    return elem_candidates if matched else None
 
 
 def _match_mapping_value(candidates: list[object]) -> list[object] | None:
@@ -303,6 +329,21 @@ def _format_problem_line(problem: SettingsProblem) -> str:
     return problem["message"]
 
 
+def _safe_non_missing_message(err_type: str, err: Mapping[str, object]) -> str:
+    if err_type == "union_tag_invalid":
+        ctx = err.get("ctx")
+        if isinstance(ctx, Mapping):
+            disc = ctx.get("discriminator")
+            expected = ctx.get("expected_tags")
+            if disc is not None and expected is not None:
+                return (
+                    f"Input tag found using {disc} does not match any of the expected tags: "
+                    f"{expected}"
+                )
+        return "Invalid union tag"
+    return str(err["msg"])
+
+
 def build_settings_error_from_validation(
     exc: ValidationError,
     *,
@@ -335,7 +376,7 @@ def build_settings_error_from_validation(
             else:
                 message = "missing"
         else:
-            message = err["msg"]
+            message = _safe_non_missing_message(err_type, err)
         problems.append({"field": field, "type": err_type, "message": message})
     lines = [_format_problem_line(problem) for problem in problems]
     return SettingsError("\n".join(lines), problems)
