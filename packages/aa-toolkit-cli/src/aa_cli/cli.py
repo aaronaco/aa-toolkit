@@ -39,7 +39,9 @@ from aa_cli.redact import (
     FileError,
     UnknownKind,
     build_redactor,
+    check_file,
     clean_text,
+    find_all,
     redact_file,
 )
 
@@ -256,6 +258,13 @@ def redact(
             help=f"Leave these built-in kinds visible: {', '.join(WITHOUT_KINDS)}.",
         ),
     ] = None,
+    check: Annotated[
+        bool,
+        typer.Option(
+            "--check",
+            help="Report every Finding and exit 1 when any is found, without printing the text.",
+        ),
+    ] = False,
     json_output: JsonFlag = False,
     verbose: VerboseFlag = False,
 ) -> None:
@@ -272,7 +281,16 @@ def redact(
             param_hint="'FILE'",
         )
     try:
-        if out.json:
+        if check:
+            if out.json:
+                findings = find_all(file, redactor)
+                out.success({"findings": findings}, human="")
+                found = bool(findings)
+            else:
+                found = check_file(file, redactor)
+            if found:
+                raise typer.Exit(ExitCode.PROBLEMS)
+        elif out.json:
             out.success({"text": clean_text(file, redactor)}, human="")
         else:
             redact_file(file, redactor)
