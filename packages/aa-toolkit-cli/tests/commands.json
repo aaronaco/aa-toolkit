@@ -1,0 +1,189 @@
+{
+  "ok": true,
+  "data": {
+    "exit_codes": [
+      {
+        "code": 0,
+        "meaning": "ok"
+      },
+      {
+        "code": 1,
+        "meaning": "problems found"
+      },
+      {
+        "code": 2,
+        "meaning": "usage error"
+      },
+      {
+        "code": 3,
+        "meaning": "unexpected error"
+      },
+      {
+        "code": 130,
+        "meaning": "stopped with Ctrl+C"
+      }
+    ],
+    "global_options": [
+      {
+        "flag": "--json",
+        "type": "boolean",
+        "default": false,
+        "choices": null,
+        "required": false,
+        "repeatable": false,
+        "help": "Print one JSON object on stdout. Same as AA_JSON=1."
+      },
+      {
+        "flag": "--verbose",
+        "type": "boolean",
+        "default": false,
+        "choices": null,
+        "required": false,
+        "repeatable": false,
+        "help": "Log debug details to stderr."
+      },
+      {
+        "flag": "--version",
+        "type": "boolean",
+        "default": false,
+        "choices": null,
+        "required": false,
+        "repeatable": false,
+        "help": "Show the version and exit."
+      }
+    ],
+    "commands": [
+      {
+        "name": "add",
+        "summary": "Add a piece to the project in the current folder.",
+        "effect": "write",
+        "arguments": [
+          {
+            "name": "PIECE",
+            "type": "string",
+            "required": true,
+            "help": "The piece to add (ci).",
+            "choices": [
+              "ci"
+            ]
+          }
+        ],
+        "options": []
+      },
+      {
+        "name": "init",
+        "summary": "Create a project in a new or empty folder.",
+        "effect": "write",
+        "arguments": [
+          {
+            "name": "NAME",
+            "type": "string",
+            "required": true,
+            "help": "The project name, also the folder it goes in."
+          }
+        ],
+        "options": [
+          {
+            "flag": "--cli",
+            "type": "boolean",
+            "default": false,
+            "choices": null,
+            "required": false,
+            "repeatable": false,
+            "help": "Create a CLI project (the default)."
+          },
+          {
+            "flag": "--lib",
+            "type": "boolean",
+            "default": false,
+            "choices": null,
+            "required": false,
+            "repeatable": false,
+            "help": "Create a typed library project."
+          },
+          {
+            "flag": "--license",
+            "type": "string",
+            "default": "MIT",
+            "choices": [
+              "MIT",
+              "none"
+            ],
+            "required": false,
+            "repeatable": false,
+            "help": "The license to add."
+          },
+          {
+            "flag": "--github",
+            "type": "boolean",
+            "default": false,
+            "choices": null,
+            "required": false,
+            "repeatable": false,
+            "help": "Also create a private GitHub repo and push to it."
+          },
+          {
+            "flag": "--public",
+            "type": "boolean",
+            "default": false,
+            "choices": null,
+            "required": false,
+            "repeatable": false,
+            "help": "Make the GitHub repo public. Needs --github."
+          }
+        ]
+      },
+      {
+        "name": "redact",
+        "summary": "Print a cleaned copy of a file or piped text.",
+        "effect": "read",
+        "arguments": [
+          {
+            "name": "FILE",
+            "type": "string",
+            "required": false,
+            "help": "The file to clean, or standard input when omitted."
+          }
+        ],
+        "options": [
+          {
+            "flag": "--with",
+            "type": "array",
+            "items": "string",
+            "default": null,
+            "choices": null,
+            "required": false,
+            "repeatable": true,
+            "help": "Also hide these off-by-default kinds: IP_ADDRESS, PHONE."
+          },
+          {
+            "flag": "--without",
+            "type": "array",
+            "items": "string",
+            "default": null,
+            "choices": null,
+            "required": false,
+            "repeatable": true,
+            "help": "Leave these built-in kinds visible: AWS_ACCESS_KEY, GITHUB_TOKEN, API_KEY, SLACK_TOKEN, JWT, BEARER_TOKEN, PRIVATE_KEY, URL_PASSWORD, EMAIL, CARD."
+          },
+          {
+            "flag": "--check",
+            "type": "boolean",
+            "default": false,
+            "choices": null,
+            "required": false,
+            "repeatable": false,
+            "help": "Report every Finding and exit 1 when any is found, without printing the text."
+          }
+        ]
+      },
+      {
+        "name": "commands",
+        "summary": "List every command, its arguments, flags and exit codes.",
+        "effect": "read",
+        "arguments": [],
+        "options": []
+      }
+    ]
+  }
+}

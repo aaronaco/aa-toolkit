@@ -15,6 +15,7 @@ import typer
 from typer.core import TyperGroup
 
 from aa_cli.add import AddError, Piece, add_piece
+from aa_cli.commands import Effect, describe_cli, format_commands
 from aa_cli.init import (
     NAME_RULE,
     Kind,
@@ -327,6 +328,26 @@ def redact(
     except FileError as exc:
         out.failure(exc.code, str(exc))
         raise typer.Exit(ExitCode.PROBLEMS) from exc
+
+
+COMMAND_EFFECTS: dict[str, Effect] = {
+    "add": Effect.WRITE,
+    "init": Effect.WRITE,
+    "redact": Effect.READ,
+    "commands": Effect.READ,
+}
+
+
+@app.command()
+def commands(
+    ctx: typer.Context,
+    json_output: JsonFlag = False,
+    verbose: VerboseFlag = False,
+) -> None:
+    """List every command, its arguments, flags and exit codes."""
+    out: Output = ctx.obj
+    data = describe_cli(app, COMMAND_EFFECTS)
+    out.success(data, human=format_commands(data["commands"]))
 
 
 @app.command(hidden=True)
