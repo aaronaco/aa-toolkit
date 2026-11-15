@@ -62,9 +62,10 @@
             "name": "PIECE",
             "type": "string",
             "required": true,
-            "help": "The piece to add (ci).",
+            "help": "The piece to add (ci, log).",
             "choices": [
-              "ci"
+              "ci",
+              "log"
             ]
           }
         ],

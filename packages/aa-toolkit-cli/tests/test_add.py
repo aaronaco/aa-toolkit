@@ -338,7 +338,238 @@ def test_missing_or_unknown_piece_is_a_usage_error_listing_valid_pieces(aa, args
     assert human.exit_code == 2
     assert human.stdout == ""
     assert "ci" in human.stderr
+    assert "log" in human.stderr
     assert as_json.exit_code == 2
     error = json.loads(as_json.stdout)["error"]
     assert error["code"] == "usage"
     assert "ci" in error["message"]
+    assert "log" in error["message"]
+
+
+EXPECTED_LOG_REQUIREMENT = (
+    "aa-toolkit-log @ git+https://github.com/aaronaco/aa-toolkit@log-v0.1.0"
+    "#subdirectory=packages/aa-toolkit-log"
+)
+
+
+def test_add_log_runs_uv_add_with_pinned_github_requirement_and_leaves_code_and_gitignore_alone(
+    aa_in, machine, tmp_path
+):
+    machine = uv_machine(machine)
+    project_dir = tmp_path / "my-app"
+    project_dir.mkdir()
+    subprocess.run(
+        ["uv", "init", "--package"],
+        cwd=project_dir,
+        env=host_env(machine),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    gitignore = project_dir / ".gitignore"
+    gitignore.write_text("__pycache__/\n.venv/\n", encoding="utf-8")
+    before_src = snapshot(project_dir / "src")
+    before_gitignore = gitignore.read_bytes()
+
+    machine.add_fake_uv()
+    result = aa_in(project_dir, "add", "log", "--json", env=machine.env)
+
+    assert result.exit_code == 0, result.output
+    calls = machine.uv_calls()
+    assert len(calls) == 1
+    assert calls[0].cwd == project_dir.resolve()
+    assert calls[0].args == ["add", EXPECTED_LOG_REQUIREMENT]
+    envelope = json.loads(result.stdout)
+    assert envelope["ok"] is True
+    data = envelope["data"]
+    assert data["piece"] == "log"
+    assert data["files"] == ["pyproject.toml", "uv.lock"]
+    next_steps = data["next_steps"]
+    assert isinstance(next_steps, list)
+    assert all(isinstance(item, str) for item in next_steps)
+    assert len(next_steps) == 2
+    assert "from aa_log import configure_logging" in next_steps[0]
+    assert "configure_logging()" in next_steps[0]
+    assert "only apps" in next_steps[0].lower()
+    assert "library" in next_steps[0].lower()
+    assert "*.log" in next_steps[1]
+    assert "*.log.[1-3]" in next_steps[1]
+    assert snapshot(project_dir / "src") == before_src
+    assert gitignore.read_bytes() == before_gitignore
+    assert run_git(project_dir, machine, "diff", "--cached", "--name-only") == ""
+    assert run_git(project_dir, machine, "rev-list", "--all", "--count").strip() == "0"
+
+
+def test_add_log_in_human_mode_lists_changed_files_and_next_steps(aa_in, machine, tmp_path):
+    machine = uv_machine(machine)
+    project = make_uv_project(tmp_path, machine)
+    machine.add_fake_uv()
+
+    result = aa_in(project, "add", "log", env=machine.env)
+
+    assert result.exit_code == 0, result.output
+    for file_path in ("pyproject.toml", "uv.lock"):
+        assert file_path in result.stdout
+    assert "from aa_log import configure_logging" in result.stdout
+    assert "configure_logging()" in result.stdout
+    assert "only apps" in result.stdout.lower()
+    assert "library" in result.stdout.lower()
+    assert "*.log" in result.stdout
+    assert "*.log.[1-3]" in result.stdout
+
+
+def test_add_log_skips_gitignore_step_when_both_lines_are_present_and_shows_only_missing_ones(
+    aa_in, machine, tmp_path
+):
+    machine = uv_machine(machine)
+
+    both_dir = tmp_path / "both-present"
+    both_dir.mkdir()
+    make_uv_project(both_dir, machine)
+    (both_dir / ".gitignore").write_text(".venv/\n*.log\n*.log.[1-3]\n", encoding="utf-8")
+
+    only_star_dir = tmp_path / "only-star-log"
+    only_star_dir.mkdir()
+    make_uv_project(only_star_dir, machine)
+    (only_star_dir / ".gitignore").write_text("*.log\n", encoding="utf-8")
+
+    only_rotated_dir = tmp_path / "only-rotated"
+    only_rotated_dir.mkdir()
+    make_uv_project(only_rotated_dir, machine)
+    (only_rotated_dir / ".gitignore").write_text("*.log.[1-3]\n", encoding="utf-8")
+
+    commented_dir = tmp_path / "commented"
+    commented_dir.mkdir()
+    make_uv_project(commented_dir, machine)
+    (commented_dir / ".gitignore").write_text("# *.log\n", encoding="utf-8")
+
+    machine.add_fake_uv()
+
+    res_both = aa_in(both_dir, "add", "log", "--json", env=machine.env)
+    assert res_both.exit_code == 0, res_both.output
+    both_steps = json.loads(res_both.stdout)["data"]["next_steps"]
+    assert len(both_steps) == 1
+    assert "from aa_log import configure_logging" in both_steps[0]
+    assert "configure_logging()" in both_steps[0]
+    assert "only apps" in both_steps[0].lower()
+    assert "library" in both_steps[0].lower()
+    assert ".gitignore" not in both_steps[0]
+
+    human_both = aa_in(both_dir, "add", "log", env=machine.env)
+    assert human_both.exit_code == 0, human_both.output
+    assert "from aa_log import configure_logging" in human_both.stdout
+    assert "configure_logging()" in human_both.stdout
+    assert ".gitignore" not in human_both.stdout
+
+    no_gitignore_dir = tmp_path / "no-gitignore"
+    no_gitignore_dir.mkdir()
+    make_uv_project(no_gitignore_dir, machine)
+    gitignore_path = no_gitignore_dir / ".gitignore"
+    if gitignore_path.exists():
+        gitignore_path.unlink()
+    res_no_gitignore = aa_in(no_gitignore_dir, "add", "log", "--json", env=machine.env)
+    assert res_no_gitignore.exit_code == 0, res_no_gitignore.output
+    assert not gitignore_path.exists()
+    no_gi_steps = json.loads(res_no_gitignore.stdout)["data"]["next_steps"]
+    assert len(no_gi_steps) == 2
+    assert "*.log" in no_gi_steps[1]
+    assert "*.log.[1-3]" in no_gi_steps[1]
+
+    res_only_star = aa_in(only_star_dir, "add", "log", "--json", env=machine.env)
+    assert res_only_star.exit_code == 0, res_only_star.output
+    star_steps = json.loads(res_only_star.stdout)["data"]["next_steps"]
+    assert len(star_steps) == 2
+    assert star_steps[1] == "Add *.log.[1-3] to .gitignore."
+
+    res_only_rotated = aa_in(only_rotated_dir, "add", "log", "--json", env=machine.env)
+    assert res_only_rotated.exit_code == 0, res_only_rotated.output
+    rotated_steps = json.loads(res_only_rotated.stdout)["data"]["next_steps"]
+    assert len(rotated_steps) == 2
+    assert rotated_steps[1] == "Add *.log to .gitignore."
+
+    res_commented = aa_in(commented_dir, "add", "log", "--json", env=machine.env)
+    assert res_commented.exit_code == 0, res_commented.output
+    commented_steps = json.loads(res_commented.stdout)["data"]["next_steps"]
+    assert len(commented_steps) == 2
+    assert "*.log" in commented_steps[1]
+    assert "*.log.[1-3]" in commented_steps[1]
+
+
+def test_when_log_is_already_a_dependency_it_says_so_skips_uv_prints_next_steps_and_exits_0(
+    aa_in, machine, tmp_path
+):
+    machine = uv_machine(machine)
+    project = make_uv_project(tmp_path, machine)
+    pyproject = project / "pyproject.toml"
+    pyproject.write_text(
+        pyproject.read_text(encoding="utf-8").replace(
+            "dependencies = []",
+            f'dependencies = ["{EXPECTED_LOG_REQUIREMENT}"]',
+        ),
+        encoding="utf-8",
+    )
+    before = snapshot(project)
+
+    human = aa_in(project, "add", "log", env=machine.env)
+    as_json = aa_in(project, "add", "log", "--json", env=machine.env)
+
+    assert human.exit_code == 0, human.output
+    assert "already there" in human.stdout.lower()
+    assert "from aa_log import configure_logging" in human.stdout
+    assert "configure_logging()" in human.stdout
+    assert "only apps" in human.stdout.lower()
+    assert "*.log" in human.stdout
+    assert "*.log.[1-3]" in human.stdout
+
+    assert as_json.exit_code == 0, as_json.output
+    envelope = json.loads(as_json.stdout)
+    assert envelope["ok"] is True
+    assert envelope["data"]["piece"] == "log"
+    assert envelope["data"]["files"] == []
+    json_steps = envelope["data"]["next_steps"]
+    assert len(json_steps) == 2
+    assert "from aa_log import configure_logging" in json_steps[0]
+    assert "configure_logging()" in json_steps[0]
+    assert "only apps" in json_steps[0].lower()
+    assert "library" in json_steps[0].lower()
+    assert "*.log" in json_steps[1]
+    assert "*.log.[1-3]" in json_steps[1]
+    assert snapshot(project) == before
+
+
+def test_add_log_adds_runtime_dependency_when_only_in_dev_group(aa_in, machine, tmp_path):
+    machine = uv_machine(machine)
+    project = make_uv_project(tmp_path, machine)
+    pyproject = project / "pyproject.toml"
+    pyproject.write_text(
+        pyproject.read_text(encoding="utf-8")
+        + f'\n[dependency-groups]\ndev = ["{EXPECTED_LOG_REQUIREMENT}"]\n',
+        encoding="utf-8",
+    )
+    machine.add_fake_uv()
+
+    result = aa_in(project, "add", "log", "--json", env=machine.env)
+
+    assert result.exit_code == 0, result.output
+    assert [call.args for call in machine.uv_calls()] == [["add", EXPECTED_LOG_REQUIREMENT]]
+    parsed = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    assert EXPECTED_LOG_REQUIREMENT in parsed["project"]["dependencies"]
+
+
+def test_add_log_when_uv_fails_exits_1_with_step_failed(aa_in, machine, tmp_path):
+    machine.add_real("git")
+    machine.set_identity(name="Ada Lovelace", email="ada@example.com")
+    project = make_uv_project(tmp_path, machine)
+    before = snapshot(project)
+    machine.add_failing("uv", "fake uv: failed to fetch tag log-v0.1.0")
+
+    human = aa_in(project, "add", "log", env=machine.env)
+    as_json = aa_in(project, "add", "log", "--json", env=machine.env)
+
+    assert human.exit_code == 1
+    assert "fake uv: failed to fetch tag log-v0.1.0" in human.stderr
+    assert as_json.exit_code == 1
+    error = json.loads(as_json.stdout)["error"]
+    assert error["code"] == "step_failed"
+    assert "fake uv: failed to fetch tag log-v0.1.0" in error["message"]
+    assert snapshot(project) == before

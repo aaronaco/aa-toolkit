@@ -21,12 +21,24 @@ from aa_cli.init import (
 UV_LOCK = "uv.lock"
 NOT_A_PROJECT_FIX = "Run aa add from the project's root folder (where pyproject.toml is)."
 _CI_TOOLS = ("ruff", "pytest")
+LOG_PACKAGE = "aa-toolkit-log"
+LOG_TAG = "log-v0.1.0"
+LOG_REQUIREMENT = (
+    f"{LOG_PACKAGE} @ git+https://github.com/aaronaco/aa-toolkit@{LOG_TAG}"
+    "#subdirectory=packages/aa-toolkit-log"
+)
+_LOG_START_STEP = (
+    "Add 'from aa_log import configure_logging' and call 'configure_logging()' where the app"
+    " starts (only apps call it; a library should skip it)."
+)
+_LOG_GITIGNORE_LINES = ("*.log", "*.log.[1-3]")
 _REQ_NAME = re.compile(r"\s*([A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)")
 _NORMALIZE = re.compile(r"[-_.]+")
 
 
 class Piece(StrEnum):
     CI = "ci"
+    LOG = "log"
 
 
 class AddError(Exception):
@@ -62,14 +74,10 @@ def _add_ci(target: Path, pyproject: Path) -> Added:
     missing = [tool for tool in _CI_TOOLS if tool not in existing]
     if workflow_already_there and not missing and (target / UV_LOCK).is_file():
         return Added(files=[], next_steps=[])
-    before = _read_uv_files(target)
     if missing:
-        step("add dev dependencies", target, "uv", "add", "--dev", *missing)
+        changed = _uv_step("add dev dependencies", target, "add", "--dev", *missing)
     else:
-        step("lock dependencies", target, "uv", "lock")
-    changed = [
-        name for name, content in _read_uv_files(target).items() if before.get(name) != content
-    ]
+        changed = _uv_step("lock dependencies", target, "lock")
     if not workflow_already_there:
         with file_step(WRITE_FILES_STEP):
             write(workflow, expected)
@@ -77,7 +85,39 @@ def _add_ci(target: Path, pyproject: Path) -> Added:
     return Added(files=sorted(changed), next_steps=[])
 
 
-_PIECES = {Piece.CI: _add_ci}
+def _add_log(target: Path, pyproject: Path) -> Added:
+    next_steps = _log_next_steps(target)
+    if LOG_PACKAGE in _declared_dependencies(pyproject, include_groups=False):
+        return Added(files=[], next_steps=next_steps)
+    changed = _uv_step("add log dependency", target, "add", LOG_REQUIREMENT)
+    return Added(files=sorted(changed), next_steps=next_steps)
+
+
+def _log_next_steps(target: Path) -> list[str]:
+    steps = [_LOG_START_STEP]
+    missing = _missing_gitignore_lines(target / ".gitignore")
+    if missing:
+        steps.append(f"Add {', '.join(missing)} to .gitignore.")
+    return steps
+
+
+def _missing_gitignore_lines(gitignore: Path) -> list[str]:
+    existing: set[str] = set()
+    if gitignore.is_file():
+        try:
+            existing = {line.strip() for line in gitignore.read_text(encoding="utf-8").splitlines()}
+        except OSError, UnicodeDecodeError:
+            existing = set()
+    return [line for line in _LOG_GITIGNORE_LINES if line not in existing]
+
+
+def _uv_step(step_name: str, target: Path, *args: str) -> list[str]:
+    before = _read_uv_files(target)
+    step(step_name, target, "uv", *args)
+    return [name for name, content in _read_uv_files(target).items() if before.get(name) != content]
+
+
+_PIECES = {Piece.CI: _add_ci, Piece.LOG: _add_log}
 
 
 def _check_workflow_path(target: Path, workflow: Path, expected: str) -> bool:
@@ -103,22 +143,23 @@ def _has_content(path: Path, expected: str) -> bool:
         return False
 
 
-def _declared_dependencies(pyproject: Path) -> set[str]:
+def _declared_dependencies(pyproject: Path, *, include_groups: bool = True) -> set[str]:
     try:
         config = tomllib.loads(pyproject.read_text(encoding="utf-8"))
     except OSError, UnicodeDecodeError, tomllib.TOMLDecodeError:
         return set()
     project = _as_dict(config.get("project"))
-    dep_groups = _as_dict(config.get("dependency-groups"))
-    uv_config = _as_dict(_as_dict(config.get("tool")).get("uv"))
     items: list[object] = []
     project_deps = project.get("dependencies", [])
     if isinstance(project_deps, list):
         items.extend(project_deps)
-    groups = _groups_with_legacy_dev(dep_groups, uv_config)
-    seen: set[str] = set()
-    for group_name in _default_group_names(uv_config, groups):
-        items.extend(_expand_group(groups, group_name, seen))
+    if include_groups:
+        dep_groups = _as_dict(config.get("dependency-groups"))
+        uv_config = _as_dict(_as_dict(config.get("tool")).get("uv"))
+        groups = _groups_with_legacy_dev(dep_groups, uv_config)
+        seen: set[str] = set()
+        for group_name in _default_group_names(uv_config, groups):
+            items.extend(_expand_group(groups, group_name, seen))
     names: set[str] = set()
     for item in items:
         if isinstance(item, str) and (match := _REQ_NAME.match(item)):
