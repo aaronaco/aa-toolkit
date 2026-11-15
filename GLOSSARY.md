@@ -48,6 +48,10 @@ _Avoid_: program, service
 A repo that `aa init` set up.
 _Avoid_: repo (when you mean a project), workspace
 
+**Output contract**:
+The promise every `aa` command keeps to whoever runs it, whether a person, a script or an agent: one machine-readable answer when asked for one, logs kept apart from that answer, the same exit codes everywhere, and never waiting for input no one can give.
+_Avoid_: contract (on its own, or for anything else), API, interface
+
 **Release**:
 Choosing a project's next version, recording its changelog and tagging it.
 _Avoid_: ship, deploy
