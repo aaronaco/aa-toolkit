@@ -87,7 +87,7 @@ def _add_ci(target: Path, pyproject: Path) -> Added:
 
 def _add_log(target: Path, pyproject: Path) -> Added:
     next_steps = _log_next_steps(target)
-    if LOG_PACKAGE in _declared_dependencies(pyproject):
+    if LOG_PACKAGE in _declared_dependencies(pyproject, include_groups=False):
         return Added(files=[], next_steps=next_steps)
     changed = _uv_step("add log dependency", target, "add", LOG_REQUIREMENT)
     return Added(files=sorted(changed), next_steps=next_steps)
@@ -143,22 +143,23 @@ def _has_content(path: Path, expected: str) -> bool:
         return False
 
 
-def _declared_dependencies(pyproject: Path) -> set[str]:
+def _declared_dependencies(pyproject: Path, *, include_groups: bool = True) -> set[str]:
     try:
         config = tomllib.loads(pyproject.read_text(encoding="utf-8"))
     except OSError, UnicodeDecodeError, tomllib.TOMLDecodeError:
         return set()
     project = _as_dict(config.get("project"))
-    dep_groups = _as_dict(config.get("dependency-groups"))
-    uv_config = _as_dict(_as_dict(config.get("tool")).get("uv"))
     items: list[object] = []
     project_deps = project.get("dependencies", [])
     if isinstance(project_deps, list):
         items.extend(project_deps)
-    groups = _groups_with_legacy_dev(dep_groups, uv_config)
-    seen: set[str] = set()
-    for group_name in _default_group_names(uv_config, groups):
-        items.extend(_expand_group(groups, group_name, seen))
+    if include_groups:
+        dep_groups = _as_dict(config.get("dependency-groups"))
+        uv_config = _as_dict(_as_dict(config.get("tool")).get("uv"))
+        groups = _groups_with_legacy_dev(dep_groups, uv_config)
+        seen: set[str] = set()
+        for group_name in _default_group_names(uv_config, groups):
+            items.extend(_expand_group(groups, group_name, seen))
     names: set[str] = set()
     for item in items:
         if isinstance(item, str) and (match := _REQ_NAME.match(item)):

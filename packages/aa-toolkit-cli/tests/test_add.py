@@ -449,10 +449,16 @@ def test_add_log_skips_gitignore_step_when_both_lines_are_present_and_shows_only
     assert res_both.exit_code == 0, res_both.output
     both_steps = json.loads(res_both.stdout)["data"]["next_steps"]
     assert len(both_steps) == 1
+    assert "from aa_log import configure_logging" in both_steps[0]
+    assert "configure_logging()" in both_steps[0]
+    assert "only apps" in both_steps[0].lower()
+    assert "library" in both_steps[0].lower()
     assert ".gitignore" not in both_steps[0]
 
     human_both = aa_in(both_dir, "add", "log", env=machine.env)
     assert human_both.exit_code == 0, human_both.output
+    assert "from aa_log import configure_logging" in human_both.stdout
+    assert "configure_logging()" in human_both.stdout
     assert ".gitignore" not in human_both.stdout
 
     no_gitignore_dir = tmp_path / "no-gitignore"
@@ -520,8 +526,34 @@ def test_when_log_is_already_a_dependency_it_says_so_skips_uv_prints_next_steps_
     assert envelope["ok"] is True
     assert envelope["data"]["piece"] == "log"
     assert envelope["data"]["files"] == []
-    assert len(envelope["data"]["next_steps"]) == 2
+    json_steps = envelope["data"]["next_steps"]
+    assert len(json_steps) == 2
+    assert "from aa_log import configure_logging" in json_steps[0]
+    assert "configure_logging()" in json_steps[0]
+    assert "only apps" in json_steps[0].lower()
+    assert "library" in json_steps[0].lower()
+    assert "*.log" in json_steps[1]
+    assert "*.log.[1-3]" in json_steps[1]
     assert snapshot(project) == before
+
+
+def test_add_log_adds_runtime_dependency_when_only_in_dev_group(aa_in, machine, tmp_path):
+    machine = uv_machine(machine)
+    project = make_uv_project(tmp_path, machine)
+    pyproject = project / "pyproject.toml"
+    pyproject.write_text(
+        pyproject.read_text(encoding="utf-8")
+        + f'\n[dependency-groups]\ndev = ["{EXPECTED_LOG_REQUIREMENT}"]\n',
+        encoding="utf-8",
+    )
+    machine.add_fake_uv()
+
+    result = aa_in(project, "add", "log", "--json", env=machine.env)
+
+    assert result.exit_code == 0, result.output
+    assert [call.args for call in machine.uv_calls()] == [["add", EXPECTED_LOG_REQUIREMENT]]
+    parsed = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    assert EXPECTED_LOG_REQUIREMENT in parsed["project"]["dependencies"]
 
 
 def test_add_log_when_uv_fails_exits_1_with_step_failed(aa_in, machine, tmp_path):
