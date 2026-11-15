@@ -364,3 +364,135 @@ def test_ctrl_c_exits_130_with_aborted_and_keeps_lines_already_printed(
     assert result.exit_code == 130
     assert result.stdout == "first=[EMAIL]\n"
     assert "Aborted" in result.stderr
+
+
+def test_check_reports_findings_in_a_file_at_1_based_line_and_column_and_exits_1(
+    aa, tmp_path: Path
+) -> None:
+    log = tmp_path / "app.log"
+    original = b"first line\nsecond line\nuser=jane@corp.com\n"
+    log.write_bytes(original)
+
+    result = aa("redact", "--check", "app.log")
+
+    assert result.exit_code == 1
+    assert result.stdout == "app.log:3:6: EMAIL\n"
+    assert result.stderr == ""
+    assert "jane@corp.com" not in result.stdout
+    assert log.read_bytes() == original
+
+
+def test_check_piped_text_reports_stdin_source_multiple_findings_in_order_and_redacted(aa) -> None:
+    text = f"user=jane@corp.com gh={GITHUB_TOKEN}\npassword=hunter2\n"
+
+    result = aa("redact", "--check", stdin=text)
+
+    assert result.exit_code == 1
+    assert result.stdout == (
+        "<stdin>:1:6: EMAIL\n<stdin>:1:23: GITHUB_TOKEN\n<stdin>:2:10: REDACTED\n"
+    )
+    assert "jane@corp.com" not in result.stdout
+    assert GITHUB_TOKEN not in result.stdout
+    assert "hunter2" not in result.stdout
+
+
+def test_check_counts_columns_in_characters_not_bytes(aa) -> None:
+    # "café ☕ user=" is 12 characters (15 UTF-8 bytes), so the email starts at column 13.
+    result = aa("redact", "--check", stdin="café ☕ user=jane@corp.com\n")
+
+    assert result.exit_code == 1
+    assert result.stdout == "<stdin>:1:13: EMAIL\n"
+
+
+def test_check_reports_a_multiline_private_key_once_at_its_start(aa) -> None:
+    complete = aa("redact", "--check", stdin=f"before\nkey = {private_key()}after=jane@corp.com\n")
+    unclosed = aa("redact", "--check", stdin=f"before\nkey = {private_key(end=False)}")
+
+    assert complete.exit_code == 1
+    assert complete.stdout == "<stdin>:2:7: PRIVATE_KEY\n<stdin>:6:7: EMAIL\n"
+    assert "MIIEvQIB" not in complete.stdout
+    assert "PRIVATE KEY-----" not in complete.stdout
+
+    assert unclosed.exit_code == 1
+    assert unclosed.stdout == "<stdin>:2:7: PRIVATE_KEY\n"
+    assert "MIIEvQIB" not in unclosed.stdout
+
+
+def test_check_on_clean_input_prints_nothing_and_exits_0(aa) -> None:
+    result = aa("redact", "--check", stdin="nothing sensitive here\n")
+
+    assert result.exit_code == 0
+    assert result.stdout == ""
+    assert result.stderr == ""
+
+
+def test_check_respects_with_and_without_flags(aa) -> None:
+    ignored = aa("redact", "--check", "--without", "EMAIL", stdin="user=jane@corp.com\n")
+    added = aa("redact", "--check", "--with", "IP_ADDRESS", stdin="from 203.0.113.7\n")
+
+    assert ignored.exit_code == 0
+    assert ignored.stdout == ""
+
+    assert added.exit_code == 1
+    assert added.stdout == "<stdin>:1:6: IP_ADDRESS\n"
+    assert "203.0.113.7" not in added.stdout
+
+
+def test_check_as_a_real_process_flushes_each_report_line_before_stdin_closes() -> None:
+    aa_bin = shutil.which("aa", path=str(Path(sys.executable).parent))
+    assert aa_bin is not None
+    process = subprocess.Popen(
+        [aa_bin, "redact", "--check"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert process.stdin is not None
+    assert process.stdout is not None
+    try:
+        process.stdin.write(b"user=jane@corp.com\n")
+        process.stdin.flush()
+        line = process.stdout.readline()
+        assert line.rstrip(b"\r\n") == b"<stdin>:1:6: EMAIL"
+        process.stdin.close()
+        assert process.wait(timeout=5) == 1
+    finally:
+        process.kill()
+        process.wait()
+
+
+@pytest.mark.parametrize(
+    ("args", "env"),
+    [
+        (["--json", "redact", "--check"], None),
+        (["redact", "--check", "--json"], None),
+        (["redact", "--check"], {"AA_JSON": "1"}),
+    ],
+    ids=["flag-before", "flag-after", "env"],
+)
+def test_check_json_mode_prints_findings_envelope_and_exits_1(
+    aa, args: list[str], env: dict[str, str] | None
+) -> None:
+    text = f"first line\nsecond line\nuser=jane@corp.com\n{private_key()}"
+
+    result = aa(*args, stdin=text, env=env)
+
+    assert result.exit_code == 1
+    assert "jane@corp.com" not in result.stdout
+    assert "MIIEvQIB" not in result.stdout
+    assert json.loads(result.stdout) == {
+        "ok": True,
+        "data": {
+            "findings": [
+                {"line": 3, "column": 6, "end_line": 3, "end_column": 19, "kind": "EMAIL"},
+                {"line": 4, "column": 1, "end_line": 7, "end_column": 26, "kind": "PRIVATE_KEY"},
+            ]
+        },
+    }
+
+
+def test_check_json_mode_on_clean_input_prints_empty_findings_and_exits_0(aa) -> None:
+    result = aa("redact", "--check", "--json", stdin="clean line\n")
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout) == {"ok": True, "data": {"findings": []}}
