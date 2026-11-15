@@ -36,6 +36,10 @@ _Avoid_: deny list
 The text left where a redacted value used to be, naming only what kind of value it was, such as `[EMAIL]`.
 _Avoid_: mask, token
 
+**Finding**:
+One sensitive value found in a text, given by its kind and where it sits, never by the value itself.
+_Avoid_: match, hit, detection
+
 **App**:
 A program someone runs, as opposed to a library that other code imports. An app decides how its logs look and where they go.
 _Avoid_: program, service
