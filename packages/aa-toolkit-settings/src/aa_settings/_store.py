@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 import keyring
 from keyring.backends import null as null_keyring
 from keyring.errors import NoKeyringError, PasswordDeleteError
-from pydantic import AliasChoices
+from pydantic import AliasChoices, AliasPath
 from pydantic_settings import PydanticBaseSettingsSource
 
 from aa_settings._errors import SettingsError, SettingsProblem
@@ -29,18 +29,40 @@ class SecretStoreError(Exception):
         self.no_store = no_store
 
 
-def _validation_key(field: FieldInfo, field_name: str, config: Mapping[str, Any]) -> str:
-    """The dict key pydantic expects when populating `field`."""
-    if not config.get("validate_by_alias", True):
-        return field_name
-    alias = field.validation_alias
+def _alias_path(alias: object) -> tuple[str, ...] | None:
     if isinstance(alias, str):
-        return alias
+        return (alias,)
+    if isinstance(alias, AliasPath) and all(isinstance(part, str) for part in alias.path):
+        return tuple(str(part) for part in alias.path)
+    return None
+
+
+def _validation_path(
+    field: FieldInfo, field_name: str, config: Mapping[str, Any]
+) -> tuple[str, ...]:
+    """The key path pydantic expects when populating `field`."""
+    if not config.get("validate_by_alias", True):
+        return (field_name,)
+    alias = field.validation_alias
     if isinstance(alias, AliasChoices):
-        first = alias.choices[0]
-        if isinstance(first, str):
-            return first
-    return field_name
+        for choice in alias.choices:
+            resolved = _alias_path(choice)
+            if resolved is not None:
+                return resolved
+        return (field_name,)
+    resolved = _alias_path(alias)
+    return resolved if resolved is not None else (field_name,)
+
+
+def _assign_path(data: dict[str, Any], path: tuple[str, ...], value: str) -> None:
+    cursor = data
+    for part in path[:-1]:
+        nested = cursor.get(part)
+        if not isinstance(nested, dict):
+            nested = {}
+            cursor[part] = nested
+        cursor = nested
+    cursor[path[-1]] = value
 
 
 def _read_secret(app_name: str, field_name: str) -> tuple[str | None, SettingsProblem | None, bool]:
@@ -62,13 +84,18 @@ class SecretStoreSettingsSource(PydanticBaseSettingsSource):
         self.app_name = self.config.get("app_name")
 
     def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any, str, bool]:
-        field_key = _validation_key(field, field_name, self.config)
+        path = _validation_path(field, field_name, self.config)
         if not self.app_name or not is_secret_annotation(field.annotation):
-            return None, field_key, False
+            return None, path[0], False
         value, problem, _ = _read_secret(self.app_name, field_name)
         if problem is not None:
             raise SettingsError(f"{problem['field']}: {problem['message']}", [problem])
-        return value, field_key, False
+        if value is None or len(path) == 1:
+            return value, path[0], False
+        nested: Any = value
+        for part in reversed(path[1:]):
+            nested = {part: nested}
+        return nested, path[0], False
 
     def __call__(self) -> dict[str, Any]:
         if not self.app_name:
@@ -85,7 +112,7 @@ class SecretStoreSettingsSource(PydanticBaseSettingsSource):
                 problems.append(problem)
                 continue
             if value is not None:
-                data[_validation_key(field, field_name, self.config)] = value
+                _assign_path(data, _validation_path(field, field_name, self.config), value)
         if problems:
             lines = [f"{p['field']}: {p['message']}" for p in problems]
             raise SettingsError("\n".join(lines), problems)

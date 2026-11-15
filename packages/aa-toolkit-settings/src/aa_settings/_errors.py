@@ -152,21 +152,28 @@ def _env_var_name(
     return full_name if config.get("case_sensitive", False) else full_name.upper()
 
 
+def _matches_secret_alias(loc: tuple[int | str, ...], alias: object) -> bool:
+    if isinstance(alias, str):
+        return loc == (alias,)
+    if isinstance(alias, AliasPath):
+        return tuple(alias.path) == loc
+    if isinstance(alias, AliasChoices):
+        return any(_matches_secret_alias(loc, choice) for choice in alias.choices)
+    return False
+
+
 def _secret_store_field_name(
     loc: tuple[int | str, ...],
     settings_cls: type[BaseModel],
     config: SettingsConfigDict,
 ) -> str | None:
     """The Python field name when `loc` is a top-level Secret on a class with `app_name`."""
-    if not config.get("app_name") or len(loc) != 1:
+    if not config.get("app_name") or not loc:
         return None
-    part = loc[0]
     for name, field in settings_cls.model_fields.items():
-        alias = _alias(field)
-        matches_alias = part == alias or (
-            isinstance(alias, AliasChoices) and part in _alias_names(alias)
-        )
-        if (part == name or matches_alias) and is_secret_annotation(field.annotation):
+        if not is_secret_annotation(field.annotation):
+            continue
+        if loc == (name,) or _matches_secret_alias(loc, _alias(field)):
             return name
     return None
 

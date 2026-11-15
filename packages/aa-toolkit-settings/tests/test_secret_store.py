@@ -44,9 +44,7 @@ def memory_keyring():
         keyring.set_keyring(previous)
 
 
-def test_reads_secret_from_secret_store_when_app_name_is_set(
-    memory_keyring, monkeypatch, tmp_path
-):
+def test_reads_secret_from_secret_store_when_app_name_is_set(memory_keyring, monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     memory_keyring.set_password("my-app", "api_key", "sk-from-store")
 
@@ -195,21 +193,55 @@ def test_secret_under_different_app_name_is_not_read(memory_keyring, monkeypatch
 
 
 def test_secret_entry_uses_field_name_not_alias_or_env_name(memory_keyring, monkeypatch, tmp_path):
-    from pydantic import Field
+    from pydantic import AliasChoices, AliasPath, Field
 
     monkeypatch.chdir(tmp_path)
     memory_keyring.set_password("my-app", "api_key", "by-field-name")
     memory_keyring.set_password("my-app", "CUSTOM_KEY", "by-alias")
     memory_keyring.set_password("my-app", "APP_API_KEY", "by-env-name")
+    memory_keyring.set_password("my-app", "nested_key", "by-path-field")
+    memory_keyring.set_password("my-app", "choice_key", "by-choice-field")
 
     class Settings(BaseSettings):
         model_config = SettingsConfigDict(app_name="my-app", env_prefix="APP_")
 
         api_key: Secret[str] = Field(validation_alias="CUSTOM_KEY")
+        nested_key: Secret[str] = Field(validation_alias=AliasPath("nested", "key"))
+        choice_key: Secret[str] = Field(
+            validation_alias=AliasChoices(AliasPath("alt", "key"), "FALLBACK")
+        )
 
     settings = Settings()
 
     assert settings.api_key.get_secret_value() == "by-field-name"
+    assert settings.nested_key.get_secret_value() == "by-path-field"
+    assert settings.choice_key.get_secret_value() == "by-choice-field"
+
+
+def test_missing_alias_path_secret_with_app_name_hints_aa_secret_set(
+    memory_keyring, monkeypatch, tmp_path
+):
+    from pydantic import AliasChoices, AliasPath, Field
+
+    from aa_settings import SettingsError
+
+    monkeypatch.chdir(tmp_path)
+
+    class Settings(BaseSettings):
+        model_config = SettingsConfigDict(app_name="my-app")
+
+        nested_key: Secret[str] = Field(validation_alias=AliasPath("nested", "key"))
+        choice_key: Secret[str] = Field(
+            validation_alias=AliasChoices(AliasPath("alt", "key"), "FALLBACK")
+        )
+
+    with pytest.raises(SettingsError) as exc_info:
+        Settings()
+
+    assert str(exc_info.value).splitlines() == [
+        "nested.key: missing. Run aa secret set nested_key",
+        "alt.key: missing. Run aa secret set choice_key",
+    ]
 
 
 def test_loads_from_env_and_dotenv_without_error_when_machine_has_no_secret_store(
