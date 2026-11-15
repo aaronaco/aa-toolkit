@@ -56,9 +56,11 @@ select = ["E", "F", "W", "I", "UP", "B", "ANN", "PYI", "S"]
 [tool.ruff.lint.isort]
 known-first-party = ["aa_cli", "aa_log", "aa_redact", "aa_settings"]
 
-# ADR 0001: a library never imports another library. The CLI may import them, so it isn't listed.
+# ADR 0001: a library never imports another library. The CLI may import them, so it isn't listed
+# in the first contract.
 [tool.importlinter]
-root_packages = ["aa_log", "aa_redact", "aa_settings"]
+root_packages = ["aa_cli", "aa_log", "aa_redact", "aa_settings"]
+include_external_packages = true
 
 [[tool.importlinter.contracts]]
 name = "Libraries don't import each other"
@@ -74,3 +76,10 @@ dynamic-function-decorator-return = "error"
 missing-type-argument = "error"
 possibly-unresolved-reference = "warn"
 unsound-return-statement = "error"
+
+# Crash reports stay movable into the CLIs aa init creates, or into a library of their own.
+[[tool.importlinter.contracts]]
+name = "Crash reports import only the standard library"
+type = "forbidden"
+source_modules = ["aa_cli.crash"]
+forbidden_modules = ["aa_redact", "typer", "aa_cli.*"]
