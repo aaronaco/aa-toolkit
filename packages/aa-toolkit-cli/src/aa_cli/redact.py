@@ -37,8 +37,6 @@ class UnknownKind(Exception):
         accepted = ", ".join(allowed)
         super().__init__(f"unknown kind {kind!r}; choose from: {accepted}")
         self.flag = flag
-        self.kind = kind
-        self.allowed = tuple(allowed)
 
 
 class FileError(Exception):
@@ -93,20 +91,21 @@ def open_input(file: Path | None) -> Generator[BinaryIO]:
     if file.is_dir():
         raise FileError("cannot_read", f"{file} is a folder")
     try:
-        with file.open("rb") as stream:
-            yield stream
+        stream = file.open("rb")
     except FileNotFoundError as exc:
         raise FileError("file_not_found", f"{file} does not exist") from exc
     except OSError as exc:
         detail = exc.strerror or str(exc)
         raise FileError("cannot_read", f"cannot read {file}: {detail}") from exc
+    with stream:
+        yield stream
 
 
 def _clean(redact: Redactor, text: str) -> str:
     try:
         return redact(text)
     except Exception as exc:
-        raise DetectorFailed(exc) from exc
+        raise DetectorFailed(exc) from None
 
 
 def clean_stream(stream: BinaryIO, redact: Redactor) -> Iterator[str]:

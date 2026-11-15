@@ -284,6 +284,27 @@ def test_an_unreadable_file_exits_1_with_cannot_read_saying_why(
     assert "Permission denied" in error["message"]
 
 
+def test_a_broken_pipe_while_writing_output_is_not_reported_as_cannot_read(
+    aa, tmp_path: Path, monkeypatch
+) -> None:
+    import errno
+
+    from aa_cli import redact as redact_mod
+
+    log = tmp_path / "app.log"
+    log.write_text("user=jane@corp.com\n", encoding="utf-8")
+
+    def broken_write(_chunk: str) -> None:
+        raise BrokenPipeError(errno.EPIPE, "Broken pipe")
+
+    monkeypatch.setattr(redact_mod, "_write_chunk", broken_write)
+
+    result = aa("redact", "app.log")
+
+    assert "cannot read" not in result.stderr
+    assert result.stderr == ""
+
+
 def test_a_failing_detector_exits_3_with_unexpected_and_no_input_text_in_the_message(
     aa, monkeypatch
 ) -> None:
@@ -295,13 +316,14 @@ def test_a_failing_detector_exits_3_with_unexpected_and_no_input_text_in_the_mes
     monkeypatch.setitem(_detectors.BUILT_IN, "EMAIL", broken)
     raw_line = "private-line-987654\n"
 
-    human = aa("redact", stdin=raw_line)
-    as_json = aa("redact", "--json", stdin=raw_line)
+    human = aa("redact", "--verbose", stdin=raw_line)
+    as_json = aa("redact", "--verbose", "--json", stdin=raw_line)
 
     assert human.exit_code == 3
     assert "private-line-987654" not in human.stderr
     assert "private-line-987654" not in human.stdout
     assert as_json.exit_code == 3
+    assert "private-line-987654" not in as_json.stderr
     error = json.loads(as_json.stdout)["error"]
     assert error["code"] == "unexpected"
     assert "private-line-987654" not in error["message"]
