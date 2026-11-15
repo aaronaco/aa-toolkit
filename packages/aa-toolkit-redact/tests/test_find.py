@@ -301,14 +301,15 @@ def test_find_returns_only_findings_that_start_before_the_size_limit():
 
 def test_find_does_not_read_past_the_limit_and_longest_value():
     seen = []
+    prefix = "a" * 100 + "b" * (64 * 1024)
 
     def spy(text):
-        seen.append(len(text))
+        seen.append(text)
         return []
 
-    Redactor(detectors=[spy], max_length=100).find("a" * 200_000)
+    Redactor(detectors=[spy], max_length=100).find(prefix + "c" * 100_000)
 
-    assert seen == [100 + 64 * 1024]
+    assert seen == [prefix]
 
 
 def test_an_error_in_a_detector_comes_out_of_find():
