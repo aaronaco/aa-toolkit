@@ -172,14 +172,11 @@ def test_commands_in_human_mode_prints_each_visible_command_with_its_summary(aa)
 
     assert result.exit_code == 0, result.output
     assert result.stderr == ""
-    lines = result.stdout.splitlines()
-    assert len(lines) == 3
-    assert "init" in lines[0]
-    assert "Create a project in a new or empty folder." in lines[0]
-    assert "redact" in lines[1]
-    assert "Print a cleaned copy of a file or piped text." in lines[1]
-    assert "commands" in lines[2]
-    assert "List every command, its arguments, flags and exit codes." in lines[2]
+    assert [line.split(None, 1) for line in result.stdout.splitlines()] == [
+        ["init", "Create a project in a new or empty folder."],
+        ["redact", "Print a cleaned copy of a file or piped text."],
+        ["commands", "List every command, its arguments, flags and exit codes."],
+    ]
 
 
 def test_commands_json_matches_the_stored_copy(aa) -> None:
