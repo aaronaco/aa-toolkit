@@ -16,7 +16,59 @@ def spans(*findings):
     return lambda text: [Finding(*finding) for finding in findings]
 
 
-def parametrized(filename, argnames):
+OVERLAP_CASES = [
+    (
+        Redactor(detectors=[spans(("SHORT", 2, 5)), spans(("LONG", 3, 8))]),
+        "0123456789",
+        [Finding("LONG", 2, 8)],
+        "01[LONG]89",
+    ),
+    (
+        Redactor(detectors=[pattern("HOST", r"example\.com")]),
+        "ask bob@example.com or see example.com",
+        [Finding("EMAIL", 4, 19), Finding("HOST", 27, 38)],
+        "ask [EMAIL] or see [HOST]",
+    ),
+    (
+        Redactor(detectors=[spans(("FIRST", 0, 4)), spans(("SECOND", 2, 6))]),
+        "0123456789",
+        [Finding("FIRST", 0, 6)],
+        "[FIRST]6789",
+    ),
+    (
+        Redactor(detectors=[spans(("SECOND", 2, 6)), spans(("FIRST", 0, 4))]),
+        "0123456789",
+        [Finding("SECOND", 0, 6)],
+        "[SECOND]6789",
+    ),
+    (
+        Redactor(detectors=[pattern("CONTACT", r"\S+@\S+")]),
+        "ask bob@example.com today",
+        [Finding("EMAIL", 4, 19)],
+        "ask [EMAIL] today",
+    ),
+    (
+        Redactor(detectors=[spans(("A", 0, 3)), spans(("B", 2, 6)), spans(("C", 5, 8))]),
+        "0123456789",
+        [Finding("B", 0, 8)],
+        "[B]89",
+    ),
+    (
+        Redactor(detectors=[spans(("A", 0, 3), ("B", 2, 4), ("C", 3, 9))]),
+        "0123456789",
+        [Finding("C", 0, 9)],
+        "[C]9",
+    ),
+    (
+        Redactor(detectors=[spans(("A", 0, 2), ("B", 2, 4))]),
+        "0123456789",
+        [Finding("A", 0, 2), Finding("B", 2, 4)],
+        "[A][B]456789",
+    ),
+]
+
+
+def parametrized(filename, argnames, *, test_name=None):
     """Read the parametrized cases for `argnames` from an existing test module."""
     path = TESTS_DIR / filename
     spec = importlib.util.spec_from_file_location(path.stem, path)
@@ -25,7 +77,8 @@ def parametrized(filename, argnames):
     spec.loader.exec_module(module)
     return [
         case
-        for item in vars(module).values()
+        for name, item in vars(module).items()
+        if test_name is None or name == test_name
         for mark in getattr(item, "pytestmark", ())
         if mark.name == "parametrize" and mark.args[0] == argnames
         for case in mark.args[1]
@@ -69,31 +122,11 @@ def test_find_orders_findings_from_a_generator_detector_that_yields_backwards():
     ]
 
 
-def test_find_merges_overlapping_findings_with_the_same_span_and_kind_as_replacing():
-    longest = Redactor(detectors=[spans(("SHORT", 2, 5)), spans(("LONG", 3, 8))])
-    assert longest.find("0123456789") == [Finding("LONG", 2, 8)]
-
-    contained = Redactor(detectors=[pattern("HOST", r"example\.com")])
-    assert contained.find("ask bob@example.com or see example.com") == [
-        Finding("EMAIL", 4, 19),
-        Finding("HOST", 27, 38),
-    ]
-
-    first, second = spans(("FIRST", 0, 4)), spans(("SECOND", 2, 6))
-    assert Redactor(detectors=[first, second]).find("0123456789") == [Finding("FIRST", 0, 6)]
-    assert Redactor(detectors=[second, first]).find("0123456789") == [Finding("SECOND", 0, 6)]
-
-    built_in_first = Redactor(detectors=[pattern("CONTACT", r"\S+@\S+")])
-    assert built_in_first.find("ask bob@example.com today") == [Finding("EMAIL", 4, 19)]
-
-    chain = Redactor(detectors=[spans(("A", 0, 3)), spans(("B", 2, 6)), spans(("C", 5, 8))])
-    assert chain.find("0123456789") == [Finding("B", 0, 8)]
-
-    starts_last = Redactor(detectors=[spans(("A", 0, 3), ("B", 2, 4), ("C", 3, 9))])
-    assert starts_last.find("0123456789") == [Finding("C", 0, 9)]
-
-    touching = Redactor(detectors=[spans(("A", 0, 2), ("B", 2, 4))])
-    assert touching.find("0123456789") == [Finding("A", 0, 2), Finding("B", 2, 4)]
+@pytest.mark.parametrize(("redact", "text", "expected_findings", "_"), OVERLAP_CASES)
+def test_find_merges_overlapping_findings_with_the_same_span_and_kind_as_replacing(
+    redact, text, expected_findings, _
+):
+    assert redact.find(text) == expected_findings
 
 
 def test_find_reports_a_value_under_a_sensitive_name_as_redacted():
@@ -148,15 +181,20 @@ def existing_cases():
         ),
         *(
             (default, text, text)
-            for text in parametrized("test_sensitive_names.py", "text")
-            if "password" not in text.lower() and "Authorization" not in text
+            for name in (
+                "test_text_with_no_value_under_a_sensitive_name_is_unchanged",
+                "test_a_quoted_name_with_spaces_that_is_not_sensitive_stays",
+            )
+            for text in parametrized("test_sensitive_names.py", "text", test_name=name)
         ),
-        (default, "password=", "password="),
-        (default, "password: ", "password: "),
-        (default, 'password=""', 'password=""'),
-        (default, "password=&page=2", "password=&page=2"),
-        (default, "password", "password"),
-        (default, "my password is long", "my password is long"),
+        *(
+            (allow_pw_length, text, text)
+            for text in parametrized(
+                "test_sensitive_names.py",
+                "text",
+                test_name="test_allow_names_keeps_a_pair_in_text_visible",
+            )
+        ),
         (default, "password='abc def", "password='[REDACTED]"),
         (default, "password=bob@example.com", "password=[REDACTED]"),
         (default, "Cookie: a=1; sid=abc\nHost: db", "Cookie: [REDACTED]\nHost: db"),
@@ -164,15 +202,6 @@ def existing_cases():
             Redactor(names=["ssn"]),
             "customer_ssn=123 ssn_last4=4",
             "customer_ssn=[REDACTED] ssn_last4=4",
-        ),
-        *(
-            (allow_pw_length, text, text)
-            for text in (
-                "password_length=12",
-                "password_length: 12",
-                "'password_length': 12",
-                '"passwordLength": 12',
-            )
         ),
         (
             Redactor(allow_names=["token"]),
@@ -234,46 +263,7 @@ def existing_cases():
             r"pw p$w.*[1]+?(a|b)^\\ and p$w991a",
             "pw [DB_PASSWORD] and p$w991a",
         ),
-        (
-            Redactor(detectors=[spans(("SHORT", 2, 5)), spans(("LONG", 3, 8))]),
-            "0123456789",
-            "01[LONG]89",
-        ),
-        (
-            Redactor(detectors=[pattern("HOST", r"example\.com")]),
-            "ask bob@example.com or see example.com",
-            "ask [EMAIL] or see [HOST]",
-        ),
-        (
-            Redactor(detectors=[spans(("FIRST", 0, 4)), spans(("SECOND", 2, 6))]),
-            "0123456789",
-            "[FIRST]6789",
-        ),
-        (
-            Redactor(detectors=[spans(("SECOND", 2, 6)), spans(("FIRST", 0, 4))]),
-            "0123456789",
-            "[SECOND]6789",
-        ),
-        (
-            Redactor(detectors=[pattern("CONTACT", r"\S+@\S+")]),
-            "ask bob@example.com today",
-            "ask [EMAIL] today",
-        ),
-        (
-            Redactor(detectors=[spans(("A", 0, 3)), spans(("B", 2, 6)), spans(("C", 5, 8))]),
-            "0123456789",
-            "[B]89",
-        ),
-        (
-            Redactor(detectors=[spans(("A", 0, 3), ("B", 2, 4), ("C", 3, 9))]),
-            "0123456789",
-            "[C]9",
-        ),
-        (
-            Redactor(detectors=[spans(("A", 0, 2), ("B", 2, 4))]),
-            "0123456789",
-            "[A][B]456789",
-        ),
+        *((redact, text, cleaned) for redact, text, _, cleaned in OVERLAP_CASES),
     ]
     assert len(cases) >= 180
     return cases
