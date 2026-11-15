@@ -104,7 +104,7 @@ To let an urgent security fix through, give that package an exception under `[to
 exclude-newer-package = { ruff = false }
 ```
 
-Remove the exception once the version is more than 7 days old. The `uv audit` workflow is what flags packages that need one.
+Remove the exception once every file of that version is more than 7 days old. A file uploaded later, such as a new wheel, waits its own 7 days, and without the exception uv leaves it out of the lock. The `uv audit` workflow is what flags packages that need one.
 
 ### Commit hooks
 
