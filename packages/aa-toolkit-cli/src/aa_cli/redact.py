@@ -140,20 +140,31 @@ def clean_stream(stream: BinaryIO, redact: Redactor) -> Iterator[str]:
         yield _clean(redact, chunk)
 
 
-def _position(text: str, offset: int, first_line: int) -> tuple[int, int]:
-    prefix = text[:offset]
-    return first_line + prefix.count("\n"), offset - prefix.rfind("\n")
+def _advance(text: str, start: int, end: int, line: int, line_start: int) -> tuple[int, int, int]:
+    newlines = text.count("\n", start, end)
+    if newlines:
+        line += newlines
+        line_start = text.rfind("\n", start, end) + 1
+    return line, end - line_start + 1, line_start
 
 
 def find_stream(stream: BinaryIO, redact: Redactor) -> Iterator[dict[str, int | str]]:
     for first_line, chunk in _read_chunks(stream):
+        cursor = 0
+        line = first_line
+        line_start = 0
         for finding in _find(redact, chunk):
-            line, column = _position(chunk, finding.start, first_line)
-            end_line, end_column = _position(chunk, finding.end, first_line)
+            start_line, column, line_start = _advance(
+                chunk, cursor, finding.start, line, line_start
+            )
+            line, end_column, line_start = _advance(
+                chunk, finding.start, finding.end, start_line, line_start
+            )
+            cursor = finding.end
             yield {
-                "line": line,
+                "line": start_line,
                 "column": column,
-                "end_line": end_line,
+                "end_line": line,
                 "end_column": end_column,
                 "kind": finding.kind,
             }

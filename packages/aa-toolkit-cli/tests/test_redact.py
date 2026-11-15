@@ -5,6 +5,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -449,16 +450,23 @@ def test_check_as_a_real_process_flushes_each_report_line_before_stdin_closes() 
     )
     assert process.stdin is not None
     assert process.stdout is not None
+    stdout = process.stdout
+    lines: list[bytes] = []
+    reader = threading.Thread(target=lambda: lines.append(stdout.readline()), daemon=True)
     try:
         process.stdin.write(b"user=jane@corp.com\n")
         process.stdin.flush()
-        line = process.stdout.readline()
-        assert line.rstrip(b"\r\n") == b"<stdin>:1:6: EMAIL"
+        reader.start()
+        reader.join(timeout=5)
+        assert not reader.is_alive()
+        assert len(lines) == 1
+        assert lines[0].rstrip(b"\r\n") == b"<stdin>:1:6: EMAIL"
         process.stdin.close()
         assert process.wait(timeout=5) == 1
     finally:
         process.kill()
         process.wait()
+        reader.join(timeout=1)
 
 
 @pytest.mark.parametrize(
@@ -496,3 +504,31 @@ def test_check_json_mode_on_clean_input_prints_empty_findings_and_exits_0(aa) ->
 
     assert result.exit_code == 0
     assert json.loads(result.stdout) == {"ok": True, "data": {"findings": []}}
+
+
+def test_check_json_mode_tracks_exact_positions_across_multiple_findings_in_one_held_chunk(
+    aa,
+) -> None:
+    key = private_key().rstrip("\n")
+    text = f"before\na=jane@corp.com {key} b={GITHUB_TOKEN}\nafter=bob@corp.com\n"
+
+    result = aa("redact", "--check", "--json", stdin=text)
+
+    assert result.exit_code == 1
+    assert json.loads(result.stdout) == {
+        "ok": True,
+        "data": {
+            "findings": [
+                {"line": 2, "column": 3, "end_line": 2, "end_column": 16, "kind": "EMAIL"},
+                {"line": 2, "column": 17, "end_line": 5, "end_column": 26, "kind": "PRIVATE_KEY"},
+                {
+                    "line": 5,
+                    "column": 29,
+                    "end_line": 5,
+                    "end_column": 29 + len(GITHUB_TOKEN),
+                    "kind": "GITHUB_TOKEN",
+                },
+                {"line": 6, "column": 7, "end_line": 6, "end_column": 19, "kind": "EMAIL"},
+            ]
+        },
+    }
