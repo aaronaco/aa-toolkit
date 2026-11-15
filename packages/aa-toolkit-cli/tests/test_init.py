@@ -485,7 +485,7 @@ def test_init_github_without_a_git_identity_fails_the_initial_commit_with_gits_e
     assert repo_creates(machine) == []
 
 
-def test_a_license_without_a_git_name_is_step_failed_and_never_committed(aa_in, machine, tmp_path):
+def test_a_license_without_a_git_name_fails_before_writing_anything(aa_in, machine, tmp_path):
     machine.add_real("uv")
     machine.add_real("git")
     machine.set_identity(name=None, email="ada@example.com")
@@ -497,8 +497,8 @@ def test_a_license_without_a_git_name_is_step_failed_and_never_committed(aa_in, 
     assert error["code"] == "step_failed"
     assert "user.name" in error["message"]
     assert error["fix"] == 'git config --global user.name "Your Name"'
-    assert "delete it before running aa init again" in error["message"]
-    assert not (created.project / "LICENSE").exists()
+    assert "delete" not in error["message"]
+    assert not created.project.exists()
 
 
 def test_a_local_init_does_not_need_gh(cli_project):
@@ -805,3 +805,256 @@ def test_init_github_asks_gh_for_the_url_when_repo_create_prints_none(aa_in, mac
 
     assert created.result.exit_code == 0, created.result.output
     assert created.envelope["data"]["github_url"] == GITHUB_URL
+
+
+# --dry-run: preview what aa init would create and run without creating or running anything.
+
+
+def test_dry_run_creates_nothing_runs_no_commands_and_reports_plan(aa_in, machine, tmp_path):
+    machine.add_real("git")
+    machine.set_identity(name="Ada Lovelace", email="ada@example.com")
+    machine.add_failing("uv", "uv must not run during dry-run")
+    machine.add_gh()
+
+    result = aa_in(tmp_path, "init", "my-app", "--dry-run", "--json", env=machine.env)
+
+    assert result.exit_code == 0, result.output
+    assert list(tmp_path.iterdir()) == []
+    assert machine.gh_calls() == []
+    envelope = json.loads(result.stdout)
+    assert envelope["ok"] is True
+    data = envelope["data"]
+    assert data["dry_run"] is True
+    assert Path(data["path"]) == (tmp_path / "my-app").resolve()
+    assert data["kind"] == "cli"
+    assert data["github_url"] is None
+    assert data["steps"] == [
+        {"step": "git init", "command": ["git", "init", "--quiet", "--initial-branch=main"]},
+        {
+            "step": "uv init",
+            "command": [
+                "uv",
+                "init",
+                "--app",
+                "--package",
+                "--python",
+                "3.15",
+                "--no-workspace",
+                "--vcs",
+                "none",
+            ],
+        },
+        {
+            "step": "add dev dependencies",
+            "command": ["uv", "add", "--python", "3.15", "--dev", "ruff", "pytest"],
+        },
+        {"step": "stage files", "command": ["git", "-c", "core.excludesFile=", "add", "--all"]},
+    ]
+
+
+@pytest.mark.parametrize(
+    ("fixture_name", "flags"),
+    [("cli_project", []), ("lib_project", ["--lib"])],
+    ids=["cli", "lib"],
+)
+def test_dry_run_files_match_a_real_run_for_cli_and_lib(
+    request, aa_in, machine, tmp_path, fixture_name, flags
+):
+    real_data = request.getfixturevalue(fixture_name).envelope["data"]
+    machine.add_real("git")
+    machine.set_identity(name="Ada Lovelace", email="ada@example.com")
+
+    result = aa_in(tmp_path, "init", "demo", "--dry-run", "--json", *flags, env=machine.env)
+
+    assert result.exit_code == 0, result.output
+    dry_data = json.loads(result.stdout)["data"]
+    assert dry_data["kind"] == real_data["kind"]
+    assert dry_data["files"] == real_data["files"]
+    assert not (tmp_path / "demo").exists()
+
+
+def test_dry_run_with_license_none_excludes_license_and_needs_no_git_name(aa_in, machine, tmp_path):
+    machine.add_failing("uv", "uv must not run during dry-run")
+    machine.add_failing("git", "git must not run when license is none")
+    machine.set_identity(name=None, email="ada@example.com")
+
+    result = aa_in(
+        tmp_path, "init", "my-app", "--license", "none", "--dry-run", "--json", env=machine.env
+    )
+
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.stdout)["data"]
+    assert "LICENSE" not in data["files"]
+    assert not (tmp_path / "my-app").exists()
+
+
+def test_dry_run_dot_uses_the_current_folders_name_for_the_package(aa_in, machine, tmp_path):
+    folder = tmp_path / "My-App"
+    folder.mkdir()
+    machine.add_real("git")
+    machine.set_identity(name="Ada Lovelace", email="ada@example.com")
+
+    result = aa_in(folder, "init", ".", "--dry-run", "--json", env=machine.env)
+
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.stdout)["data"]
+    assert Path(data["path"]) == folder.resolve()
+    assert "src/my_app/__init__.py" in data["files"]
+    assert "tests/test_my_app.py" in data["files"]
+    assert list(folder.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["bad@name"],
+        ["class"],
+        ["demo", "--cli", "--lib"],
+        ["demo", "--public"],
+    ],
+    ids=["bad-name", "keyword-name", "cli-and-lib", "public-without-github"],
+)
+def test_dry_run_fails_like_a_real_run_on_usage_errors(aa, machine, tmp_path, args):
+    env = local_machine(machine).env
+
+    real = aa("init", *args, "--json", env=env)
+    dry = aa("init", *args, "--dry-run", "--json", env=env)
+
+    assert dry.exit_code == 2
+    assert dry.exit_code == real.exit_code
+    assert json.loads(dry.stdout) == json.loads(real.stdout)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_dry_run_fails_like_a_real_run_when_target_is_not_empty(aa_in, machine, tmp_path):
+    target = tmp_path / "demo"
+    target.mkdir()
+    (target / "notes.txt").write_text("keep me")
+    env = local_machine(machine).env
+
+    real = aa_in(tmp_path, "init", "demo", "--json", env=env)
+    dry = aa_in(tmp_path, "init", "demo", "--dry-run", "--json", env=env)
+
+    assert dry.exit_code == 1
+    assert dry.exit_code == real.exit_code
+    assert json.loads(dry.stdout) == json.loads(real.stdout)
+    assert [path.name for path in target.iterdir()] == ["notes.txt"]
+    assert (target / "notes.txt").read_text() == "keep me"
+
+
+def test_dry_run_fails_like_a_real_run_when_outer_workspace_would_take_target_in(
+    aa_in, machine, tmp_path
+):
+    machine = local_machine(machine)
+    before = outer_workspace(tmp_path, git_env(machine), 'members = ["*"]\n')
+
+    real = aa_in(tmp_path, "init", "demo", "--json", env=machine.env)
+    dry = aa_in(tmp_path, "init", "demo", "--dry-run", "--json", env=machine.env)
+
+    assert dry.exit_code == 1
+    assert dry.exit_code == real.exit_code
+    assert json.loads(dry.stdout) == json.loads(real.stdout)
+    assert not (tmp_path / "demo").exists()
+    assert outer_files(tmp_path) == before
+    assert outer_still_locks(tmp_path)
+
+
+def test_dry_run_fails_like_a_real_run_when_git_name_is_missing_for_mit(aa_in, machine, tmp_path):
+    machine.add_real("uv")
+    machine.add_real("git")
+    machine.set_identity(name=None, email="ada@example.com")
+
+    real = aa_in(tmp_path, "init", "demo", "--json", env=machine.env)
+    dry = aa_in(tmp_path, "init", "demo", "--dry-run", "--json", env=machine.env)
+
+    assert dry.exit_code == 1
+    assert dry.exit_code == real.exit_code
+    assert json.loads(dry.stdout) == json.loads(real.stdout)
+    assert not (tmp_path / "demo").exists()
+
+
+@pytest.mark.parametrize(
+    ("extra_flags", "visibility"),
+    [([], "--private"), (["--public"], "--public")],
+    ids=["private", "public"],
+)
+def test_dry_run_with_github_plans_commit_and_repo_without_calling_gh(
+    aa_in, machine, tmp_path, extra_flags, visibility
+):
+    machine.add_real("git")
+    machine.set_identity(name="Ada Lovelace", email="ada@example.com")
+    machine.add_gh()
+
+    result = aa_in(
+        tmp_path, "init", "my-app", "--github", *extra_flags, "--dry-run", "--json", env=machine.env
+    )
+
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.stdout)["data"]
+    assert data["github_url"] is None
+    assert data["steps"][-2:] == [
+        {
+            "step": "initial commit",
+            "command": ["git", "commit", "--quiet", "--message", COMMIT_MESSAGE],
+        },
+        {
+            "step": "create GitHub repo",
+            "command": ["gh", "repo", "create", "my-app", visibility, "--source", ".", "--push"],
+        },
+    ]
+    assert machine.gh_calls() == []
+    assert not (tmp_path / "my-app").exists()
+
+
+def test_dry_run_in_human_mode_prints_files_and_commands_without_creating_anything(
+    aa_in, machine, tmp_path
+):
+    machine.add_real("git")
+    machine.set_identity(name="Ada Lovelace", email="ada@example.com")
+
+    result = aa_in(tmp_path, "init", "my-app", "--dry-run", env=machine.env)
+
+    assert result.exit_code == 0, result.output
+    assert result.stderr == ""
+    assert not (tmp_path / "my-app").exists()
+    lines = result.stdout.splitlines()
+    assert lines[0] == f"Would create a cli project at {(tmp_path / 'my-app').resolve()}"
+    assert "Would run:" in lines
+    run_index = lines.index("Would run:")
+    planned_files = [line.strip() for line in lines[1:run_index]]
+    assert "pyproject.toml" in planned_files
+    assert "src/my_app/__init__.py" in planned_files
+    assert "LICENSE" in planned_files
+    planned_commands = [line.strip() for line in lines[run_index + 1 :]]
+    assert planned_commands == [
+        "git init --quiet --initial-branch=main",
+        "uv init --app --package --python 3.15 --no-workspace --vcs none",
+        "uv add --python 3.15 --dev ruff pytest",
+        "git -c core.excludesFile= add --all",
+    ]
+
+
+def test_dry_run_in_human_mode_with_github_quotes_commit_message(aa_in, machine, tmp_path):
+    machine.add_real("git")
+    machine.set_identity(name="Ada Lovelace", email="ada@example.com")
+
+    result = aa_in(tmp_path, "init", "my-app", "--github", "--dry-run", env=machine.env)
+
+    assert result.exit_code == 0, result.output
+    lines = [line.strip() for line in result.stdout.splitlines()]
+    assert "git commit --quiet --message 'chore: initial commit'" in lines
+    assert "gh repo create my-app --private --source . --push" in lines
+
+
+def test_dry_run_files_match_real_run_for_consecutive_separators(aa_in, machine, tmp_path):
+    env = local_machine(machine).env
+
+    dry = aa_in(tmp_path, "init", "my--app", "--dry-run", "--json", env=env)
+    real = aa_in(tmp_path, "init", "my--app", "--json", env=env)
+
+    assert dry.exit_code == 0, dry.output
+    assert real.exit_code == 0, real.output
+    dry_files = json.loads(dry.stdout)["data"]["files"]
+    real_files = json.loads(real.stdout)["data"]["files"]
+    assert "src/my_app/__init__.py" in real_files
+    assert dry_files == real_files
