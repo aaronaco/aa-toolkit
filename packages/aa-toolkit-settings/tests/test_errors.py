@@ -279,6 +279,7 @@ def test_invalid_discriminator_tag_is_not_repeated(monkeypatch, tmp_path):
 
 def test_missing_field_hints_for_nested_models_runtime_prefix_and_by_name(monkeypatch, tmp_path):
     import json
+    from typing import Annotated
 
     from pydantic import AliasPath, BaseModel, Field
 
@@ -291,7 +292,11 @@ def test_missing_field_hints_for_nested_models_runtime_prefix_and_by_name(monkey
         model_config = SettingsConfigDict(env_prefix="APP_", env_nested_delimiter="__")
 
         db: Endpoint
+        backup: Annotated[Endpoint | None, "meta"] = None
         path_field: str = Field(validation_alias=AliasPath("nested", "key"))
+
+    class NoDelimiterSettings(BaseSettings):
+        db: Endpoint
 
     class ByNameSettings(BaseSettings):
         model_config = SettingsConfigDict(env_prefix="APP_", validate_by_alias=False)
@@ -302,7 +307,9 @@ def test_missing_field_hints_for_nested_models_runtime_prefix_and_by_name(monkey
         database_url: str
 
     with pytest.raises(SettingsError) as nested_exc:
-        NestedSettings(db=json.loads("{}"))
+        NestedSettings(db=json.loads("{}"), backup=json.loads("{}"))
+    with pytest.raises(SettingsError) as no_delimiter_exc:
+        NoDelimiterSettings(db=json.loads("{}"))
     with pytest.raises(SettingsError) as by_name_exc:
         ByNameSettings()
     with pytest.raises(SettingsError) as runtime_exc:
@@ -314,8 +321,14 @@ def test_missing_field_hints_for_nested_models_runtime_prefix_and_by_name(monkey
             "type": "missing",
             "message": "missing. Set APP_DB__PORT in the environment or in .env",
         },
+        {
+            "field": "backup.port",
+            "type": "missing",
+            "message": "missing. Set APP_BACKUP__PORT in the environment or in .env",
+        },
         {"field": "nested.key", "type": "missing", "message": "missing"},
     ]
+    assert str(no_delimiter_exc.value) == "db.port: missing"
     assert (
         str(by_name_exc.value)
         == "by_name_only: missing. Set APP_BY_NAME_ONLY in the environment or in .env"

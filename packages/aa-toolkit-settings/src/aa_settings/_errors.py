@@ -97,12 +97,21 @@ def _single_model(annotation: object) -> type[BaseModel] | None:
     return None
 
 
-def _find_field(model: type[BaseModel], part: int | str) -> tuple[str, FieldInfo] | None:
-    for name, field in model.model_fields.items():
-        alias = field.validation_alias if field.validation_alias is not None else field.alias
-        if part in (name, alias):
-            return name, field
-    return None
+def _alias(field: FieldInfo) -> object:
+    return field.validation_alias if field.validation_alias is not None else field.alias
+
+
+def _find_field(model: type[BaseModel] | None, part: int | str) -> tuple[str, FieldInfo] | None:
+    fields = model.model_fields.items() if model is not None else ()
+    return next(((name, field) for name, field in fields if part in (name, _alias(field))), None)
+
+
+def _env_name_part(name: str, field: FieldInfo, by_alias: bool) -> tuple[str, bool] | None:
+    """The name pydantic-settings reads for one field, and whether it's an alias."""
+    alias = _alias(field)
+    if not by_alias or alias is None:
+        return name, False
+    return (alias, True) if isinstance(alias, str) else None
 
 
 def _env_var_name(
@@ -111,29 +120,22 @@ def _env_var_name(
     config: SettingsConfigDict,
 ) -> str | None:
     """The environment variable that sets the missing field, or None when unsure."""
-    by_alias = config.get("validate_by_alias", True)
     delimiter = config.get("env_nested_delimiter")
     if len(loc) > 1 and not delimiter:
         return None
-    names: list[str] = []
-    first_uses_alias = False
+    parts: list[tuple[str, bool]] = []
     model: type[BaseModel] | None = settings_cls
-    for part in loc:
-        found = _find_field(model, part) if model is not None else None
-        if found is None:
+    for loc_part in loc:
+        found = _find_field(model, loc_part)
+        part = _env_name_part(*found, config.get("validate_by_alias", True)) if found else None
+        if found is None or part is None:
             return None
-        name, field = found
-        alias = field.validation_alias if field.validation_alias is not None else field.alias
-        if by_alias and alias is not None and not isinstance(alias, str):
-            return None
-        uses_alias = by_alias and isinstance(alias, str)
-        if not names:
-            first_uses_alias = uses_alias
-        names.append(str(alias) if uses_alias else name)
-        model = _single_model(field.annotation)
+        parts.append(part)
+        model = _single_model(found[1].annotation)
     target = config.get("env_prefix_target", "variable")
-    prefixed = target == "all" or target == ("alias" if first_uses_alias else "variable")
-    full_name = (config.get("env_prefix", "") if prefixed else "") + (delimiter or "").join(names)
+    prefixed = target == "all" or target == ("alias" if parts[0][1] else "variable")
+    prefix = config.get("env_prefix", "") if prefixed else ""
+    full_name = prefix + (delimiter or "").join(name for name, _ in parts)
     return full_name if config.get("case_sensitive", False) else full_name.upper()
 
 
