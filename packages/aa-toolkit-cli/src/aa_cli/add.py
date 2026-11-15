@@ -51,18 +51,16 @@ def add_piece(target: Path, piece: Piece) -> Added:
     pyproject = target / PYPROJECT
     if not pyproject.is_file():
         raise AddError("not_a_project", f"{target} has no {PYPROJECT}", fix=NOT_A_PROJECT_FIX)
-    return _add_ci(target, pyproject)
+    return _PIECES[piece](target, pyproject)
 
 
 def _add_ci(target: Path, pyproject: Path) -> Added:
     workflow = target / CI_WORKFLOW
     expected = render(CI_TEMPLATE)
-    workflow_already_there = _has_content(workflow, expected)
-    if workflow.exists() and not workflow_already_there:
-        raise AddError("file_exists", f"{CI_WORKFLOW} already exists with different content")
+    workflow_already_there = _check_workflow_path(target, workflow, expected)
     existing = _declared_dependencies(pyproject)
     missing = [tool for tool in _CI_TOOLS if tool not in existing]
-    if workflow_already_there and not missing:
+    if workflow_already_there and not missing and (target / UV_LOCK).is_file():
         return Added(files=[], next_steps=[])
     before = _read_uv_files(target)
     if missing:
@@ -77,6 +75,23 @@ def _add_ci(target: Path, pyproject: Path) -> Added:
             write(workflow, expected)
         changed.append(CI_WORKFLOW)
     return Added(files=sorted(changed), next_steps=[])
+
+
+_PIECES = {Piece.CI: _add_ci}
+
+
+def _check_workflow_path(target: Path, workflow: Path, expected: str) -> bool:
+    for parent in (workflow.parent, *workflow.parent.parents):
+        if parent == target:
+            break
+        if parent.exists() and not parent.is_dir():
+            rel = parent.relative_to(target).as_posix()
+            raise AddError("file_exists", f"{rel} already exists and is not a folder")
+    if _has_content(workflow, expected):
+        return True
+    if workflow.exists():
+        raise AddError("file_exists", f"{CI_WORKFLOW} already exists with different content")
+    return False
 
 
 def _has_content(path: Path, expected: str) -> bool:
@@ -97,17 +112,30 @@ def _declared_dependencies(pyproject: Path) -> set[str]:
     dep_groups = _as_dict(config.get("dependency-groups"))
     uv_config = _as_dict(_as_dict(config.get("tool")).get("uv"))
     items: list[object] = []
-    for raw in (project.get("dependencies", []), uv_config.get("dev-dependencies", [])):
-        if isinstance(raw, list):
-            items.extend(raw)
+    project_deps = project.get("dependencies", [])
+    if isinstance(project_deps, list):
+        items.extend(project_deps)
+    groups = _groups_with_legacy_dev(dep_groups, uv_config)
     seen: set[str] = set()
-    for group_name in _default_group_names(uv_config, dep_groups):
-        items.extend(_expand_group(dep_groups, group_name, seen))
+    for group_name in _default_group_names(uv_config, groups):
+        items.extend(_expand_group(groups, group_name, seen))
     names: set[str] = set()
     for item in items:
         if isinstance(item, str) and (match := _REQ_NAME.match(item)):
             names.add(_NORMALIZE.sub("-", match.group(1)).lower())
     return names
+
+
+def _groups_with_legacy_dev(
+    dep_groups: dict[str, Any], uv_config: dict[str, Any]
+) -> dict[str, Any]:
+    groups = dict(dep_groups)
+    legacy_dev = uv_config.get("dev-dependencies")
+    if isinstance(legacy_dev, list):
+        dev_group = groups.get("dev")
+        existing_dev = dev_group if isinstance(dev_group, list) else []
+        groups["dev"] = [*existing_dev, *legacy_dev]
+    return groups
 
 
 def _default_group_names(uv_config: dict[str, Any], dep_groups: dict[str, Any]) -> list[str]:

@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import subprocess
 import tomllib
 from pathlib import Path
@@ -50,6 +51,11 @@ def run_git(cwd: Path, machine, *args: str) -> str:
     return result.stdout
 
 
+def req_names(deps: list[str]) -> set[str]:
+    """Normalized package names from PEP 508 requirement strings."""
+    return {re.split(r"[<>=!~;\[\s]", dep, maxsplit=1)[0].lower() for dep in deps}
+
+
 def test_add_ci_writes_workflow_adds_dev_tools_creates_lockfile_and_leaves_git_alone(
     aa_in, machine, tmp_path
 ):
@@ -81,8 +87,7 @@ def test_add_ci_writes_workflow_adds_dev_tools_creates_lockfile_and_leaves_git_a
     assert (project / ".github/workflows/ci.yml").read_text(encoding="utf-8") == expected_workflow
     pyproject = tomllib.loads((project / "pyproject.toml").read_text(encoding="utf-8"))
     dev_deps = pyproject["dependency-groups"]["dev"]
-    assert any(dep.startswith("ruff") for dep in dev_deps)
-    assert any(dep.startswith("pytest") for dep in dev_deps)
+    assert {"ruff", "pytest"} <= req_names(dev_deps)
     assert (project / "uv.lock").is_file()
     assert run_git(project, machine, "diff", "--cached", "--name-only") == ""
     assert run_git(project, machine, "rev-list", "--all", "--count").strip() == "0"
@@ -116,7 +121,7 @@ def test_add_ci_keeps_existing_dependency_version_requirements_unchanged(aa_in, 
     assert res_dev.exit_code == 0, res_dev.output
     parsed_dev = tomllib.loads(dev_pyproject.read_text(encoding="utf-8"))
     assert "ruff>=0.16,<0.18" in parsed_dev["dependency-groups"]["dev"]
-    assert any(dep.startswith("pytest") for dep in parsed_dev["dependency-groups"]["dev"])
+    assert "pytest" in req_names(parsed_dev["dependency-groups"]["dev"])
 
     deps_dir = tmp_path / "has-pytest-in-deps"
     deps_dir.mkdir()
@@ -133,8 +138,8 @@ def test_add_ci_keeps_existing_dependency_version_requirements_unchanged(aa_in, 
     assert res_deps.exit_code == 0, res_deps.output
     parsed_deps = tomllib.loads(deps_pyproject.read_text(encoding="utf-8"))
     assert parsed_deps["project"]["dependencies"] == ["pytest>=8.0,<10"]
-    assert not any(dep.startswith("pytest") for dep in parsed_deps["dependency-groups"]["dev"])
-    assert any(dep.startswith("ruff") for dep in parsed_deps["dependency-groups"]["dev"])
+    assert "pytest" not in req_names(parsed_deps["dependency-groups"]["dev"])
+    assert "ruff" in req_names(parsed_deps["dependency-groups"]["dev"])
 
     both_dir = tmp_path / "has-both-unlocked"
     both_dir.mkdir()
@@ -153,12 +158,20 @@ def test_add_ci_keeps_existing_dependency_version_requirements_unchanged(aa_in, 
     assert (both_dir / "uv.lock").is_file()
     assert json.loads(res_both.stdout)["data"]["files"] == [".github/workflows/ci.yml", "uv.lock"]
 
+    (both_dir / "uv.lock").unlink()
+    res_relock = aa_in(both_dir, "add", "ci", "--json", env=machine.env)
+    assert res_relock.exit_code == 0, res_relock.output
+    assert (both_dir / "uv.lock").is_file()
+    assert json.loads(res_relock.stdout)["data"]["files"] == ["uv.lock"]
+
 
 def test_add_ci_adds_tools_to_dev_when_only_in_optional_or_non_default_group(
     aa_in, machine, tmp_path
 ):
     machine = uv_machine(machine)
-    project = make_uv_project(tmp_path, machine)
+    project_dir = tmp_path / "optional-and-non-default"
+    project_dir.mkdir()
+    project = make_uv_project(project_dir, machine)
     pyproject = project / "pyproject.toml"
     pyproject.write_text(
         pyproject.read_text(encoding="utf-8")
@@ -172,10 +185,47 @@ def test_add_ci_adds_tools_to_dev_when_only_in_optional_or_non_default_group(
     assert result.exit_code == 0, result.output
     parsed = tomllib.loads(pyproject.read_text(encoding="utf-8"))
     dev_deps = parsed["dependency-groups"]["dev"]
-    assert any(dep.startswith("ruff") for dep in dev_deps)
-    assert any(dep.startswith("pytest") for dep in dev_deps)
+    assert {"ruff", "pytest"} <= req_names(dev_deps)
     assert parsed["project"]["optional-dependencies"]["lint"] == ["ruff>=0.16,<0.18"]
     assert parsed["dependency-groups"]["test"] == ["pytest>=8.0,<10"]
+
+    included_dir = tmp_path / "legacy-dev-included"
+    included_dir.mkdir()
+    make_uv_project(included_dir, machine)
+    included_pyproject = included_dir / "pyproject.toml"
+    included_pyproject.write_text(
+        included_pyproject.read_text(encoding="utf-8")
+        + '\n[tool.uv]\ndefault-groups = "all"\ndev-dependencies = ["ruff>=0.16,<0.18"]\n'
+        + '\n[dependency-groups]\ntest = [{include-group = "lint"}]\nlint = []\n',
+        encoding="utf-8",
+    )
+
+    res_included = aa_in(included_dir, "add", "ci", "--json", env=machine.env)
+
+    assert res_included.exit_code == 0, res_included.output
+    parsed_included = tomllib.loads(included_pyproject.read_text(encoding="utf-8"))
+    assert "ruff>=0.16,<0.18" in parsed_included["tool"]["uv"]["dev-dependencies"]
+    assert {"ruff", "pytest"} <= req_names(parsed_included["tool"]["uv"]["dev-dependencies"])
+
+    excluded_dir = tmp_path / "legacy-dev-excluded"
+    excluded_dir.mkdir()
+    make_uv_project(excluded_dir, machine)
+    excluded_pyproject = excluded_dir / "pyproject.toml"
+    excluded_pyproject.write_text(
+        excluded_pyproject.read_text(encoding="utf-8")
+        + '\n[tool.uv]\ndefault-groups = ["test"]\n'
+        + 'dev-dependencies = ["ruff>=0.16,<0.18", "pytest>=8.0,<10"]\n'
+        + "\n[dependency-groups]\ntest = []\n",
+        encoding="utf-8",
+    )
+    res_excluded = aa_in(excluded_dir, "add", "ci", "--json", env=machine.env)
+
+    assert res_excluded.exit_code == 0, res_excluded.output
+    assert json.loads(res_excluded.stdout)["data"]["files"] == [
+        ".github/workflows/ci.yml",
+        "pyproject.toml",
+        "uv.lock",
+    ]
 
 
 def snapshot(project: Path) -> dict[Path, bytes]:
@@ -190,7 +240,9 @@ def test_existing_workflow_with_different_content_fails_with_file_exists_and_cha
     aa_in, machine, tmp_path
 ):
     machine = uv_machine(machine)
-    project = make_uv_project(tmp_path, machine)
+    project_dir = tmp_path / "workflow-file"
+    project_dir.mkdir()
+    project = make_uv_project(project_dir, machine)
     workflow = project / ".github/workflows/ci.yml"
     workflow.parent.mkdir(parents=True)
     workflow.write_text("name: Custom CI\n", encoding="utf-8")
@@ -207,6 +259,21 @@ def test_existing_workflow_with_different_content_fails_with_file_exists_and_cha
     assert ".github/workflows/ci.yml" in error["message"]
     assert snapshot(project) == before
     assert not (project / "uv.lock").exists()
+
+    parent_dir = tmp_path / "parent-file"
+    parent_dir.mkdir()
+    parent_conflict = make_uv_project(parent_dir, machine)
+    (parent_conflict / ".github").write_text("not a dir\n", encoding="utf-8")
+    before_parent = snapshot(parent_conflict)
+
+    parent_json = aa_in(parent_conflict, "add", "ci", "--json", env=machine.env)
+
+    assert parent_json.exit_code == 1
+    parent_error = json.loads(parent_json.stdout)["error"]
+    assert parent_error["code"] == "file_exists"
+    assert ".github" in parent_error["message"]
+    assert snapshot(parent_conflict) == before_parent
+    assert not (parent_conflict / "uv.lock").exists()
 
 
 def test_when_ci_is_already_there_it_says_so_changes_nothing_and_exits_0(aa_in, machine, tmp_path):
