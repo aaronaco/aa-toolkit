@@ -70,6 +70,18 @@ def test_every_example_in_the_readme_prints_what_the_readme_says(
         "get_secret_value()",
         "known_values",
         "secret_values",
+        "app_name",
+        "aa secret set api_key",
+        "Control Panel",
+        "Credential Manager",
+        "Windows Credentials",
+        "2560 bytes",
+        "Ed25519",
+        "RSA",
+        "same Windows user",
+        "Only Windows is tested",
+        "macOS Keychain",
+        "Linux Secret Service",
     ],
 )
 def test_the_readme_covers_install_secrets_and_limits(package_dir, snippet):

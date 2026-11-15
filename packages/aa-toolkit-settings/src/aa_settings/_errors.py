@@ -10,11 +10,14 @@ from typing import TYPE_CHECKING, Annotated, Literal, TypedDict, Union, get_args
 
 from pydantic import AliasChoices, AliasPath, BaseModel
 
+from aa_settings._secrets import is_secret_annotation
+
 if TYPE_CHECKING:
     from pydantic import ValidationError
     from pydantic.fields import FieldInfo
-    from pydantic_settings import SettingsConfigDict
     from pydantic_settings.exceptions import SettingsError as PydanticSettingsError
+
+    from aa_settings._settings import SettingsConfigDict
 
 KEY_PLACEHOLDER = "[key]"
 
@@ -149,6 +152,25 @@ def _env_var_name(
     return full_name if config.get("case_sensitive", False) else full_name.upper()
 
 
+def _secret_store_field_name(
+    loc: tuple[int | str, ...],
+    settings_cls: type[BaseModel],
+    config: SettingsConfigDict,
+) -> str | None:
+    """The Python field name when `loc` is a top-level Secret on a class with `app_name`."""
+    if not config.get("app_name") or len(loc) != 1:
+        return None
+    part = loc[0]
+    for name, field in settings_cls.model_fields.items():
+        alias = _alias(field)
+        matches_alias = part == alias or (
+            isinstance(alias, AliasChoices) and part in _alias_names(alias)
+        )
+        if (part == name or matches_alias) and is_secret_annotation(field.annotation):
+            return name
+    return None
+
+
 def _safe_message(
     err: Mapping[str, object],
     settings_cls: type[BaseModel],
@@ -157,7 +179,19 @@ def _safe_message(
     if err["type"] == "missing":
         loc = err["loc"]
         env_name = _env_var_name(loc, settings_cls, config) if isinstance(loc, tuple) else None
-        return f"missing. Set {env_name} in the environment or in .env" if env_name else "missing"
+        secret_name = (
+            _secret_store_field_name(loc, settings_cls, config) if isinstance(loc, tuple) else None
+        )
+        if env_name and secret_name:
+            return (
+                f"missing. Set {env_name} in the environment or in .env, "
+                f"or run aa secret set {secret_name}"
+            )
+        if env_name:
+            return f"missing. Set {env_name} in the environment or in .env"
+        if secret_name:
+            return f"missing. Run aa secret set {secret_name}"
+        return "missing"
     if err["type"] == "union_tag_invalid":
         # pydantic's message repeats the tag from the input.
         ctx = err.get("ctx")

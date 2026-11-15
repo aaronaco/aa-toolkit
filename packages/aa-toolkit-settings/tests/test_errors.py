@@ -360,3 +360,40 @@ def test_model_validator_error_has_no_field(monkeypatch, tmp_path):
 
     assert str(exc_info.value) == "Value error, invalid root combination"
     assert exc_info.value.problems[0]["field"] == ""
+
+
+def test_missing_secret_in_class_with_app_name_hints_aa_secret_set(monkeypatch, tmp_path):
+    import keyring
+    from keyring.backends import fail
+    from pydantic import AliasChoices, Field
+
+    monkeypatch.chdir(tmp_path)
+    previous = keyring.get_keyring()
+    keyring.set_keyring(fail.Keyring())
+    try:
+
+        class Settings(BaseSettings):
+            model_config = SettingsConfigDict(app_name="my-app", env_prefix="APP_")
+
+            database_url: str
+            api_key: Secret[str]
+            token: Secret[str] = Field(validation_alias="CUSTOM_TOKEN")
+            either: Secret[str] = Field(validation_alias=AliasChoices("TOK_A", "TOK_B"))
+
+        with pytest.raises(SettingsError) as exc_info:
+            Settings()
+    finally:
+        keyring.set_keyring(previous)
+
+    assert str(exc_info.value).splitlines() == [
+        "database_url: missing. Set APP_DATABASE_URL in the environment or in .env",
+        (
+            "api_key: missing. Set APP_API_KEY in the environment or in .env, "
+            "or run aa secret set api_key"
+        ),
+        (
+            "CUSTOM_TOKEN: missing. Set CUSTOM_TOKEN in the environment or in .env, "
+            "or run aa secret set token"
+        ),
+        "TOK_A: missing. Run aa secret set either",
+    ]
