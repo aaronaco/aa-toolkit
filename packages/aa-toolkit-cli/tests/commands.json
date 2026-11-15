@@ -130,6 +130,15 @@
             "required": false,
             "repeatable": false,
             "help": "Make the GitHub repo public. Needs --github."
+          },
+          {
+            "flag": "--dry-run",
+            "type": "boolean",
+            "default": false,
+            "choices": null,
+            "required": false,
+            "repeatable": false,
+            "help": "Show what would be created and run, without creating or running anything."
           }
         ]
       },

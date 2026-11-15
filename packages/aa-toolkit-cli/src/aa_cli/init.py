@@ -65,6 +65,22 @@ class StepFailed(Exception):
 
 
 @dataclass(frozen=True)
+class StepSpec:
+    """One external command ``aa init`` runs."""
+
+    name: str
+    command: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class InitPlan:
+    """What ``aa init --dry-run`` would create and run."""
+
+    files: list[str]
+    steps: list[StepSpec]
+
+
+@dataclass(frozen=True)
 class OuterWorkspace:
     """A uv workspace above the target whose members would include the new project."""
 
@@ -80,10 +96,14 @@ class OuterWorkspace:
         )
 
 
+def _import_name(name: str) -> str:
+    # uv lowercases the name and turns '-' into '_' to get the import name.
+    return name.lower().replace("-", "_")
+
+
 def is_valid_name(name: str) -> bool:
     """Whether ``name`` follows NAME_RULE, so uv can build a package from it as it is."""
-    # uv lowercases the name and turns '-' into '_' to get the import name.
-    import_name = name.lower().replace("-", "_")
+    import_name = _import_name(name)
     return (
         _NAME.fullmatch(name) is not None
         # True, False and None are keywords only as typed; the import name catches the rest.
@@ -155,75 +175,113 @@ def _rerun_note(target: Path) -> Generator[None]:
         raise FileNotFoundError(" ".join(filter(None, [f"{exc}.", note()]))) from exc
 
 
+def _local_steps(kind: Kind) -> list[StepSpec]:
+    # --python wins over a UV_PYTHON set in the environment, which would
+    # otherwise override the project's pin.
+    return [
+        # aa makes the repo itself: uv init skips it inside another repo, and the
+        # branch must be main whatever the machine's default is.
+        StepSpec("git init", ("git", "init", "--quiet", f"--initial-branch={BRANCH}")),
+        StepSpec(
+            "uv init",
+            (
+                "uv",
+                "init",
+                "--lib" if kind is Kind.LIB else "--app",
+                "--package",
+                "--python",
+                PYTHON_VERSION,
+                "--no-workspace",
+                "--vcs",
+                "none",
+            ),
+        ),
+        StepSpec(
+            "add dev dependencies",
+            ("uv", "add", "--python", PYTHON_VERSION, "--dev", "ruff", "pytest"),
+        ),
+        # The folder holds only what aa just made, so global ignore rules have nothing to protect.
+        # One like *.lock would drop a file the project's CI needs, and git add wouldn't say so.
+        StepSpec("stage files", ("git", "-c", "core.excludesFile=", "add", "--all")),
+    ]
+
+
+def _github_steps(repo_name: str, public: bool) -> list[StepSpec]:
+    return [
+        StepSpec("initial commit", ("git", "commit", "--quiet", "--message", COMMIT_MESSAGE)),
+        StepSpec(
+            "create GitHub repo",
+            (
+                "gh",
+                "repo",
+                "create",
+                repo_name,
+                "--public" if public else "--private",
+                "--source",
+                ".",
+                "--push",
+            ),
+        ),
+    ]
+
+
+def plan_project(
+    target: Path, kind: Kind, license_choice: License, *, github: bool, public: bool
+) -> InitPlan:
+    """Validate and render templates in memory for ``aa init --dry-run``, writing nothing."""
+    holder = _resolve_license_holder(license_choice)
+    package = _import_name(target.name)
+    # Render every template in memory so a template bug fails the dry run like a real run.
+    render("pyproject.toml.tmpl")
+    rendered = _render_outputs(target.name, package, kind, license_choice, holder)
+    uv_files = {".python-version", PYPROJECT, "uv.lock"}
+    if kind is Kind.LIB:
+        uv_files.add(f"src/{package}/py.typed")
+    steps = _local_steps(kind)
+    if github:
+        steps.extend(_github_steps(target.name, public))
+    return InitPlan(files=sorted(uv_files | rendered.keys()), steps=steps)
+
+
 def create_project(target: Path, kind: Kind, license_choice: License) -> list[str]:
     """Create the project in ``target`` (missing or empty) and return the files it holds."""
     with _rerun_note(target):
-        return _build_project(target, kind, license_choice)
+        holder = _resolve_license_holder(license_choice)
+        return _build_project(target, kind, license_choice, holder)
 
 
-def _build_project(target: Path, kind: Kind, license_choice: License) -> list[str]:
+def _build_project(target: Path, kind: Kind, license_choice: License, holder: str) -> list[str]:
     target.mkdir(exist_ok=True)
-    # aa makes the repo itself: uv init skips it inside another repo, and the
-    # branch must be main whatever the machine's default is.
-    step("git init", target, "git", "init", "--quiet", f"--initial-branch={BRANCH}")
-    step(
-        "uv init",
-        target,
-        "uv",
-        "init",
-        "--lib" if kind is Kind.LIB else "--app",
-        "--package",
-        "--python",
-        PYTHON_VERSION,
-        "--no-workspace",
-        "--vcs",
-        "none",
-    )
+    git_init, uv_init, add_deps, stage_files = _local_steps(kind)
+    step(git_init.name, target, *git_init.command)
+    step(uv_init.name, target, *uv_init.command)
     _add_uv_workspace(target)
-    # --python wins over a UV_PYTHON set in the environment, which would
-    # otherwise override the project's pin.
-    step(
-        "add dev dependencies",
-        target,
-        "uv",
-        "add",
-        "--python",
-        PYTHON_VERSION,
-        "--dev",
-        "ruff",
-        "pytest",
-    )
-    _write_files(target, kind, license_choice)
-    # The folder holds only what aa just made, so global ignore rules have nothing to protect.
-    # One like *.lock would drop a file the project's CI needs, and git add wouldn't say so.
-    step("stage files", target, "git", "-c", "core.excludesFile=", "add", "--all")
+    step(add_deps.name, target, *add_deps.command)
+    _write_files(target, kind, license_choice, holder)
+    step(stage_files.name, target, *stage_files.command)
     listed = step("list files", target, "git", "ls-files")
     return sorted(listed.splitlines())
 
 
 def commit_and_push_to_github(target: Path, public: bool) -> str:
     """Commit the project in ``target``, create its GitHub repo, push and return the repo's URL."""
+    commit_step, repo_step = _github_steps(target.name, public)
     with _rerun_note(target):
-        step("initial commit", target, "git", "commit", "--quiet", "--message", COMMIT_MESSAGE)
-    args = [
-        "repo",
-        "create",
-        target.name,
-        "--public" if public else "--private",
-        "--source",
-        ".",
-        "--push",
-    ]
+        step(commit_step.name, target, *commit_step.command)
     kept = f"The project at {target} is kept; run the fix from inside it."
     try:
-        stdout = step("create GitHub repo", target, "gh", *args)
+        stdout = step(repo_step.name, target, *repo_step.command)
     except FileNotFoundError as exc:
         raise FileNotFoundError(f"{exc}. The project at {target} is kept.") from exc
     except StepFailed as exc:
         # gh adds the new repo as origin before it pushes. Once origin is there,
         # rerunning gh repo create fails on the taken name; only the push is left.
         has_origin = run("git", "remote", "get-url", "origin", cwd=target).returncode == 0
-        fix = f"git push --set-upstream origin {BRANCH}" if has_origin else " ".join(["gh", *args])
+        fix = (
+            f"git push --set-upstream origin {BRANCH}"
+            if has_origin
+            else " ".join(repo_step.command)
+        )
         raise StepFailed(exc.step, f"{exc.detail}\n{kept}".lstrip("\n"), fix) from exc
     # Without a terminal, gh prints the new repo's URL on stdout.
     url = _GITHUB_URL.search(stdout)
@@ -258,16 +316,28 @@ def _add_uv_workspace(target: Path) -> None:
         write(pyproject, text.rstrip("\n") + "\n\n" + render("pyproject.toml.tmpl"))
 
 
-def _write_files(target: Path, kind: Kind, license_choice: License) -> None:
-    package = _package_name(target)
+def _resolve_license_holder(license_choice: License) -> str:
+    if license_choice is not License.MIT:
+        return ""
+    holder = machine_config("user.name")
+    # Nothing else stops a blank holder: git can make up an author for a commit.
+    if not holder:
+        detail = "the LICENSE needs a holder, but git's user.name is not set"
+        raise StepFailed(WRITE_FILES_STEP, detail, 'git config --global user.name "Your Name"')
+    return holder
+
+
+def _render_outputs(
+    name: str, package: str, kind: Kind, license_choice: License, holder: str
+) -> dict[str, str]:
     values = {
-        "name": target.name,
+        "name": name,
         "package": package,
         "year": str(datetime.date.today().year),
-        "holder": machine_config("user.name"),
+        "holder": holder,
     }
     package_template, test_template = _KIND_TEMPLATES[kind]
-    outputs = {
+    templates = {
         f"src/{package}/__init__.py": package_template,
         f"tests/test_{package}.py": test_template,
         "AGENTS.md": "AGENTS.md.tmpl",
@@ -277,14 +347,16 @@ def _write_files(target: Path, kind: Kind, license_choice: License) -> None:
         CI_WORKFLOW: CI_TEMPLATE,
     }
     if license_choice is License.MIT:
-        # Nothing else stops a blank holder: git can make up an author for a commit.
-        if not values["holder"]:
-            detail = "the LICENSE needs a holder, but git's user.name is not set"
-            raise StepFailed(WRITE_FILES_STEP, detail, 'git config --global user.name "Your Name"')
-        outputs["LICENSE"] = "LICENSE.tmpl"
+        templates["LICENSE"] = "LICENSE.tmpl"
+    return {path: render(template, **values) for path, template in templates.items()}
+
+
+def _write_files(target: Path, kind: Kind, license_choice: License, holder: str) -> None:
+    package = _package_name(target)
+    rendered = _render_outputs(target.name, package, kind, license_choice, holder)
     with file_step(WRITE_FILES_STEP):
-        for path, template in outputs.items():
-            write(target / path, render(template, **values))
+        for path, text in rendered.items():
+            write(target / path, text)
 
 
 def _package_name(target: Path) -> str:

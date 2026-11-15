@@ -44,12 +44,18 @@ The name is also the folder and the package name, so it must start with a letter
 
 A project is always its own uv workspace. When you run `aa init` inside another uv workspace whose `members` would include the new folder, `aa init` stops before creating anything and tells you which `exclude` entry to add, because uv would otherwise take the project in as a member and break the outer lock.
 
+Add `--dry-run` to run the same validation and print the files and commands `aa init` would create and run, without writing anything or running any outside command. With `--json`, `data` includes `"dry_run": true` and `steps`.
+
 ```bash
 aa init my-app
 ```
 
 ```bash
 aa init my-app --github
+```
+
+```bash
+aa init my-app --dry-run
 ```
 
 `aa redact [FILE]` prints a cleaned copy of a file, or of piped text when no file is given, using a `Redactor` from the [redaction library](packages/aa-toolkit-redact/README.md) with its defaults. Every sensitive value is replaced by a Placeholder such as `[EMAIL]`, and a value under a Sensitive name becomes `[REDACTED]`. The original file is never changed; redirect the output to save the cleaned copy. Each line is cleaned with its line ending and flushed as it arrives, and a private key that spans several lines is held back until its end line so its middle lines never slip out.

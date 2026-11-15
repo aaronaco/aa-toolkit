@@ -26,6 +26,7 @@ from aa_cli.init import (
     is_empty_folder_or_missing,
     is_valid_name,
     outer_workspace_taking_in,
+    plan_project,
 )
 from aa_cli.output import (
     Aborted,
@@ -219,6 +220,13 @@ def init(
     public: Annotated[
         bool, typer.Option("--public", help="Make the GitHub repo public. Needs --github.")
     ] = False,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run",
+            help="Show what would be created and run, without creating or running anything.",
+        ),
+    ] = False,
     json_output: JsonFlag = False,
     verbose: VerboseFlag = False,
 ) -> None:
@@ -239,6 +247,29 @@ def init(
         message = f"{target} would become a member of the uv workspace at {outer.root}"
         out.failure("target_in_workspace", message, fix=outer.fix)
         raise typer.Exit(ExitCode.PROBLEMS)
+    if dry_run:
+        try:
+            plan = plan_project(target, kind, license_choice, github=github, public=public)
+        except StepFailed as exc:
+            out.failure("step_failed", str(exc), fix=exc.fix)
+            raise typer.Exit(ExitCode.PROBLEMS) from exc
+        steps = [{"step": s.name, "command": list(s.command)} for s in plan.steps]
+        data = {
+            "dry_run": True,
+            "path": str(target),
+            "kind": str(kind),
+            "files": plan.files,
+            "github_url": None,
+            "steps": steps,
+        }
+        lines = [
+            f"Would create a {kind} project at {target}",
+            *(f"  {f}" for f in plan.files),
+            "Would run:",
+            *(f"  {' '.join(s['command'])}" for s in steps),
+        ]
+        out.success(data, human="\n".join(lines))
+        return
     try:
         created = create_project(target, kind, license_choice)
         github_url = commit_and_push_to_github(target, public) if github else None

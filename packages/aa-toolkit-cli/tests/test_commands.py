@@ -112,7 +112,7 @@ def test_init_entry_describes_name_argument_options_and_write_effect(aa) -> None
     assert license_opt["repeatable"] is False
     assert license_opt["help"]
 
-    for flag in ("--cli", "--lib", "--github", "--public"):
+    for flag in ("--cli", "--lib", "--github", "--public", "--dry-run"):
         opt = _option_by_flag(init_cmd, flag)
         assert opt["type"] == "boolean"
         assert opt["default"] is False
