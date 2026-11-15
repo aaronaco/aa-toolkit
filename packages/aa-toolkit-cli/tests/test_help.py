@@ -42,7 +42,9 @@ def test_help_lists_add_and_add_help_names_valid_pieces(aa, color_forced):
     assert root_help.exit_code == 0
     assert "add" in ANSI_ESCAPE.sub("", root_help.stdout)
     assert add_help.exit_code == 0
-    assert "ci" in ANSI_ESCAPE.sub("", add_help.stdout)
+    add_text = ANSI_ESCAPE.sub("", add_help.stdout)
+    assert "ci" in add_text
+    assert "log" in add_text
 
 
 @pytest.mark.parametrize(

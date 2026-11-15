@@ -85,7 +85,7 @@ def test_add_entry_describes_piece_argument_choices_and_write_effect(aa) -> None
     assert [arg["name"] for arg in add_cmd["arguments"]] == ["PIECE"]
     piece_arg = add_cmd["arguments"][0]
     assert piece_arg["type"] == "string"
-    assert piece_arg["choices"] == ["ci"]
+    assert piece_arg["choices"] == ["ci", "log"]
     assert piece_arg["required"] is True
     assert piece_arg["help"]
     assert add_cmd["options"] == []

@@ -59,6 +59,41 @@ sys.exit(2)
 """
 
 
+FAKE_UV = r"""
+import json
+import os
+import re
+import sys
+import tomllib
+from pathlib import Path
+
+here = Path(__file__).parent
+with (here / "uv-calls.jsonl").open("a", encoding="utf-8") as calls:
+    calls.write(json.dumps({"args": sys.argv[1:], "cwd": os.getcwd()}) + "\n")
+
+if sys.argv[1:2] == ["add"]:
+    reqs = [arg for arg in sys.argv[2:] if not arg.startswith("-")]
+    pyproject = Path.cwd() / "pyproject.toml"
+    text = pyproject.read_text(encoding="utf-8")
+    existing = tomllib.loads(text).get("project", {}).get("dependencies", [])
+    updated = [*existing, *reqs]
+    formatted = "dependencies = [\n" + "".join(f'    "{item}",\n' for item in updated) + "]"
+    new_text = re.sub(
+        r"^dependencies = \[.*?\]",
+        lambda _m: formatted,
+        text,
+        count=1,
+        flags=re.MULTILINE | re.DOTALL,
+    )
+    pyproject.write_text(new_text, encoding="utf-8")
+    (Path.cwd() / "uv.lock").write_text("version = 1\n", encoding="utf-8")
+    sys.exit(0)
+
+print(f"fake uv: unsupported arguments {sys.argv[1:]}", file=sys.stderr)
+sys.exit(2)
+"""
+
+
 @dataclass(frozen=True)
 class GhCall:
     """One run of the fake gh: its arguments, its folder and the commit there at that moment."""
@@ -66,6 +101,14 @@ class GhCall:
     args: list[str]
     cwd: Path
     last_commit: str | None
+
+
+@dataclass(frozen=True)
+class UvCall:
+    """One run of the fake uv: its arguments and its folder."""
+
+    args: list[str]
+    cwd: Path
 
 
 OLD_GIT = """\
@@ -174,6 +217,19 @@ class Machine:
             return []
         calls = [json.loads(line) for line in log.read_text().splitlines()]
         return [GhCall(call["args"], Path(call["cwd"]), call["last_commit"]) for call in calls]
+
+    def add_fake_uv(self) -> None:
+        """Put a fake uv on PATH that records every call and edits pyproject.toml on ``uv add``."""
+        (self.bin / "fake_uv.py").write_text(FAKE_UV, encoding="utf-8")
+        self._write_shim("uv", [sys.executable, str(self.bin / "fake_uv.py")])
+
+    def uv_calls(self) -> list[UvCall]:
+        """Every call the fake uv got, in order."""
+        log = self.bin / "uv-calls.jsonl"
+        if not log.exists():
+            return []
+        calls = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+        return [UvCall(call["args"], Path(call["cwd"])) for call in calls]
 
     def add_failing(self, name: str, message: str) -> None:
         """Put a tool on PATH that prints ``message`` to stderr and fails on every call."""

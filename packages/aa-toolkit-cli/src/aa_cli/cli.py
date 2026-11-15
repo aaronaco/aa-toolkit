@@ -201,6 +201,8 @@ def add(
         lines = [f"Added {piece} to {target}", *(f"  {f}" for f in added.files)]
     else:
         lines = [f"{piece} is already there in {target}"]
+    if added.next_steps:
+        lines.extend(["", "Next steps:", *(f"  {item}" for item in added.next_steps)])
     out.success(data, human="\n".join(lines))
 
 
