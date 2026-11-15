@@ -1,6 +1,7 @@
 """The workspace's own tooling covers the redaction library, and it installs alone."""
 
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -82,22 +83,22 @@ def test_ci_runs_a_small_app_with_only_the_redaction_library_installed(repo, ci,
 
 
 @pytest.fixture
-def contract_command(repo, ci):
-    """The import contract command, taken from the hook that CI runs."""
+def independence_check_command(repo, ci):
+    """The independence check command, taken from the hook that CI runs."""
     hooks = tomllib.loads((repo / "prek.toml").read_text(encoding="utf-8"))
-    entries = [
-        hook["entry"]
-        for group in hooks["repos"]
-        for hook in group["hooks"]
-        if hook["id"] == "import-linter"
+    matching = [
+        hook for group in hooks["repos"] for hook in group["hooks"] if hook["id"] == "import-linter"
     ]
-    assert len(entries) == 1
+    assert len(matching) == 1
+    assert matching[0]["name"] == "independence check"
     assert "uv run --locked prek run --all-files" in ci
-    return shlex.split(entries[0])
+    return shlex.split(matching[0]["entry"])
 
 
-def test_the_import_contract_passes_on_the_libraries_as_they_are(repo, contract_command):
-    uv, *args = contract_command
+def test_the_independence_check_passes_on_the_libraries_as_they_are(
+    repo, independence_check_command
+):
+    uv, *args = independence_check_command
 
     done = subprocess.run(
         [shutil.which(uv) or uv, *args], cwd=repo, capture_output=True, text=True, timeout=300
@@ -107,7 +108,7 @@ def test_the_import_contract_passes_on_the_libraries_as_they_are(repo, contract_
     assert "Libraries don't import each other KEPT" in done.stdout
 
 
-def test_the_import_contract_covers_every_library_and_only_libraries(repo, pyproject):
+def test_the_independence_check_covers_every_library_and_only_libraries(repo, pyproject):
     settings = pyproject["tool"]["importlinter"]
     libraries = sorted(
         package.name
@@ -117,21 +118,21 @@ def test_the_import_contract_covers_every_library_and_only_libraries(repo, pypro
 
     assert libraries == sorted(LIBRARIES)
     assert sorted(settings["root_packages"]) == libraries
-    assert [sorted(contract["modules"]) for contract in settings["contracts"]] == [libraries]
+    assert [sorted(rule["modules"]) for rule in settings["contracts"]] == [libraries]
 
 
 @pytest.mark.parametrize(
     ("importer", "imported"), [("aa_log", "aa_redact"), ("aa_redact", "aa_log")]
 )
-def test_the_import_contract_fails_when_one_library_imports_another(
-    repo, contract_command, tmp_path, importer, imported
+def test_the_independence_check_fails_when_one_library_imports_another(
+    repo, independence_check_command, tmp_path, importer, imported
 ):
     for package, folder in LIBRARIES.items():
         shutil.copytree(repo / "packages" / folder / "src" / package, tmp_path / package)
     shutil.copy(repo / "pyproject.toml", tmp_path)
     with (tmp_path / importer / "__init__.py").open("a", encoding="utf-8") as source:
         source.write(f"\nimport {imported}\n")
-    lint_imports = shutil.which(contract_command[-1], path=Path(sys.executable).parent)
+    lint_imports = shutil.which(independence_check_command[-1], path=Path(sys.executable).parent)
     assert lint_imports
 
     done = subprocess.run(
@@ -146,3 +147,14 @@ def test_the_import_contract_fails_when_one_library_imports_another(
     assert done.returncode == 1, done.stdout + done.stderr
     assert "Libraries don't import each other BROKEN" in done.stdout
     assert f"{importer} is not allowed to import {imported}" in done.stdout
+
+
+def test_no_hook_or_test_calls_the_independence_check_a_contract(repo):
+    hooks = tomllib.loads((repo / "prek.toml").read_text(encoding="utf-8"))
+    for group in hooks["repos"]:
+        for hook in group["hooks"]:
+            assert "contract" not in hook.get("name", "").lower()
+            assert "contract" not in hook["id"].lower()
+    pattern = re.compile(r"import[_ ]con" + r"tract|con" + r"tract_command", re.IGNORECASE)
+    for test_file in repo.glob("packages/*/tests/*.py"):
+        assert pattern.search(test_file.read_text(encoding="utf-8")) is None, test_file
