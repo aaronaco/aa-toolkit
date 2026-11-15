@@ -22,6 +22,8 @@ COMMIT_MESSAGE = "chore: initial commit"
 BRANCH = "main"
 PYPROJECT = "pyproject.toml"
 WRITE_FILES_STEP = "write files"
+CI_WORKFLOW = ".github/workflows/ci.yml"
+CI_TEMPLATE = "ci.yml.tmpl"
 
 NAME_RULE = (
     "a project name starts with a letter, ends with a letter or digit, holds only"
@@ -53,7 +55,7 @@ _KIND_TEMPLATES = {
 
 
 class StepFailed(Exception):
-    """A step of ``aa init`` failed. The message names the step and the tool's error."""
+    """A step failed. The message names the step and the tool's error."""
 
     def __init__(self, step: str, detail: str, fix: str | None = None) -> None:
         super().__init__(f"step '{step}' failed: {detail}" if detail else f"step '{step}' failed")
@@ -163,8 +165,8 @@ def _build_project(target: Path, kind: Kind, license_choice: License) -> list[st
     target.mkdir(exist_ok=True)
     # aa makes the repo itself: uv init skips it inside another repo, and the
     # branch must be main whatever the machine's default is.
-    _step("git init", target, "git", "init", "--quiet", f"--initial-branch={BRANCH}")
-    _step(
+    step("git init", target, "git", "init", "--quiet", f"--initial-branch={BRANCH}")
+    step(
         "uv init",
         target,
         "uv",
@@ -180,7 +182,7 @@ def _build_project(target: Path, kind: Kind, license_choice: License) -> list[st
     _add_uv_workspace(target)
     # --python wins over a UV_PYTHON set in the environment, which would
     # otherwise override the project's pin.
-    _step(
+    step(
         "add dev dependencies",
         target,
         "uv",
@@ -194,15 +196,15 @@ def _build_project(target: Path, kind: Kind, license_choice: License) -> list[st
     _write_files(target, kind, license_choice)
     # The folder holds only what aa just made, so global ignore rules have nothing to protect.
     # One like *.lock would drop a file the project's CI needs, and git add wouldn't say so.
-    _step("stage files", target, "git", "-c", "core.excludesFile=", "add", "--all")
-    listed = _step("list files", target, "git", "ls-files")
+    step("stage files", target, "git", "-c", "core.excludesFile=", "add", "--all")
+    listed = step("list files", target, "git", "ls-files")
     return sorted(listed.splitlines())
 
 
 def commit_and_push_to_github(target: Path, public: bool) -> str:
     """Commit the project in ``target``, create its GitHub repo, push and return the repo's URL."""
     with _rerun_note(target):
-        _step("initial commit", target, "git", "commit", "--quiet", "--message", COMMIT_MESSAGE)
+        step("initial commit", target, "git", "commit", "--quiet", "--message", COMMIT_MESSAGE)
     args = [
         "repo",
         "create",
@@ -214,7 +216,7 @@ def commit_and_push_to_github(target: Path, public: bool) -> str:
     ]
     kept = f"The project at {target} is kept; run the fix from inside it."
     try:
-        stdout = _step("create GitHub repo", target, "gh", *args)
+        stdout = step("create GitHub repo", target, "gh", *args)
     except FileNotFoundError as exc:
         raise FileNotFoundError(f"{exc}. The project at {target} is kept.") from exc
     except StepFailed as exc:
@@ -229,31 +231,31 @@ def commit_and_push_to_github(target: Path, public: bool) -> str:
         return url.group(0)
     view = ["repo", "view", "--json", "url", "--jq", ".url"]
     fix = " ".join(["gh", *view])
-    return _step("read GitHub repo URL", target, "gh", *view, fix=fix).strip()
+    return step("read GitHub repo URL", target, "gh", *view, fix=fix).strip()
 
 
-def _step(step: str, cwd: Path, tool: str, *args: str, fix: str | None = None) -> str:
-    log.debug("Step: %s", step)
+def step(step_name: str, cwd: Path, tool: str, *args: str, fix: str | None = None) -> str:
+    log.debug("Step: %s", step_name)
     result = run(tool, *args, cwd=cwd)
     if result.returncode != 0:
-        raise StepFailed(step, (result.stderr or result.stdout).strip(), fix)
+        raise StepFailed(step_name, (result.stderr or result.stdout).strip(), fix)
     return result.stdout
 
 
 @contextlib.contextmanager
-def _file_step(step: str) -> Generator[None]:
-    """Report a file read or write that fails as the failure of ``step``."""
+def file_step(step_name: str) -> Generator[None]:
+    """Report a file read or write that fails as the failure of ``step_name``."""
     try:
         yield
     except OSError as exc:
-        raise StepFailed(step, str(exc)) from exc
+        raise StepFailed(step_name, str(exc)) from exc
 
 
 def _add_uv_workspace(target: Path) -> None:
     pyproject = target / PYPROJECT
-    with _file_step("add uv workspace"):
+    with file_step("add uv workspace"):
         text = pyproject.read_text(encoding="utf-8")
-        _write(pyproject, text.rstrip("\n") + "\n\n" + _render("pyproject.toml.tmpl"))
+        write(pyproject, text.rstrip("\n") + "\n\n" + render("pyproject.toml.tmpl"))
 
 
 def _write_files(target: Path, kind: Kind, license_choice: License) -> None:
@@ -272,7 +274,7 @@ def _write_files(target: Path, kind: Kind, license_choice: License) -> None:
         "CLAUDE.md": "CLAUDE.md.tmpl",
         "README.md": "README.md.tmpl",
         ".gitignore": "gitignore.tmpl",
-        ".github/workflows/ci.yml": "ci.yml.tmpl",
+        CI_WORKFLOW: CI_TEMPLATE,
     }
     if license_choice is License.MIT:
         # Nothing else stops a blank holder: git can make up an author for a commit.
@@ -280,9 +282,9 @@ def _write_files(target: Path, kind: Kind, license_choice: License) -> None:
             detail = "the LICENSE needs a holder, but git's user.name is not set"
             raise StepFailed(WRITE_FILES_STEP, detail, 'git config --global user.name "Your Name"')
         outputs["LICENSE"] = "LICENSE.tmpl"
-    with _file_step(WRITE_FILES_STEP):
+    with file_step(WRITE_FILES_STEP):
         for path, template in outputs.items():
-            _write(target / path, _render(template, **values))
+            write(target / path, render(template, **values))
 
 
 def _package_name(target: Path) -> str:
@@ -293,12 +295,12 @@ def _package_name(target: Path) -> str:
     return packages[0]
 
 
-def _render(template: str, **values: str) -> str:
+def render(template: str, **values: str) -> str:
     """Fill ``{{key}}`` placeholders. A placeholder without a value is a bug, so it raises."""
     text = (files("aa_cli") / "templates" / template).read_text(encoding="utf-8")
     return _PLACEHOLDER.sub(lambda match: values[match.group(1)], text)
 
 
-def _write(path: Path, text: str) -> None:
+def write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8", newline="\n")
