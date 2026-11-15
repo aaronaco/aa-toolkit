@@ -302,33 +302,36 @@ def test_find_does_not_read_past_the_limit_and_longest_value():
     assert seen == [prefix]
 
 
-def test_an_error_in_a_detector_comes_out_of_find():
-    def broken(text):
-        raise LookupError("no table of tax ids")
-
-    with pytest.raises(LookupError, match="no table of tax ids"):
-        Redactor(detectors=[broken]).find("tax id 123-456-789")
+def broken_detector(text):
+    raise LookupError("no table of tax ids")
 
 
-def test_an_error_partway_through_a_generator_detector_comes_out_of_find():
-    def broken(text):
-        yield Finding("FIRST", 0, 1)
-        raise LookupError("stopped early")
-
-    with pytest.raises(LookupError, match="stopped early"):
-        Redactor(detectors=[broken]).find("abc")
+def broken_generator(text):
+    yield Finding("FIRST", 0, 1)
+    raise LookupError("stopped early")
 
 
 @pytest.mark.parametrize(
-    "span",
-    [(-1, 2), (2, 4), (0, 0), (2, 1), (3, 3)],
-    ids=["starts before the text", "ends after the text", "empty", "backwards", "at the end"],
+    ("detector", "error", "match"),
+    [
+        (broken_detector, LookupError, "no table of tax ids"),
+        (broken_generator, LookupError, "stopped early"),
+        *(
+            (lambda text, span=span: [Finding("TAX_ID", *span)], ValueError, "TAX_ID")
+            for span in ((-1, 2), (2, 4), (0, 0), (2, 1), (3, 3))
+        ),
+    ],
 )
-def test_a_finding_that_does_not_fit_the_text_raises_from_find_and_names_the_kind(span):
-    redact = Redactor(detectors=[lambda text: [Finding("TAX_ID", *span)]])
+def test_find_raises_the_same_error_as_replacing_when_a_detector_fails(detector, error, match):
+    redact = Redactor(detectors=[detector])
 
-    with pytest.raises(ValueError, match="TAX_ID"):
+    with pytest.raises(error, match=match) as from_replace:
+        redact("abc")
+    with pytest.raises(error, match=match) as from_find:
         redact.find("abc")
+
+    assert type(from_find.value) is type(from_replace.value)
+    assert str(from_find.value) == str(from_replace.value)
 
 
 @pytest.mark.parametrize(
