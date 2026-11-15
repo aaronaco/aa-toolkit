@@ -11,7 +11,11 @@ from pathlib import Path
 
 import pytest
 
-LIBRARIES = {"aa_log": "aa-toolkit-log", "aa_redact": "aa-toolkit-redact"}
+LIBRARIES = {
+    "aa_log": "aa-toolkit-log",
+    "aa_redact": "aa-toolkit-redact",
+    "aa_settings": "aa-toolkit-settings",
+}
 
 
 @pytest.fixture
@@ -44,7 +48,9 @@ def test_import_sorting_knows_the_redaction_library_is_first_party(pyproject):
 
 
 def test_coverage_includes_the_redaction_library(ci):
-    assert "pytest --cov=aa_cli --cov=aa_log --cov=aa_redact --cov-report=xml" in ci
+    assert (
+        "pytest --cov=aa_cli --cov=aa_log --cov=aa_redact --cov=aa_settings --cov-report=xml" in ci
+    )
 
 
 def test_the_analysis_includes_the_redaction_library(repo):
@@ -122,7 +128,15 @@ def test_the_independence_check_covers_every_library_and_only_libraries(repo, py
 
 
 @pytest.mark.parametrize(
-    ("importer", "imported"), [("aa_log", "aa_redact"), ("aa_redact", "aa_log")]
+    ("importer", "imported"),
+    [
+        ("aa_log", "aa_redact"),
+        ("aa_log", "aa_settings"),
+        ("aa_redact", "aa_log"),
+        ("aa_redact", "aa_settings"),
+        ("aa_settings", "aa_log"),
+        ("aa_settings", "aa_redact"),
+    ],
 )
 def test_the_independence_check_fails_when_one_library_imports_another(
     repo, independence_check_command, tmp_path, importer, imported

@@ -24,6 +24,11 @@ allow-licenses:
   - Apache-2.0
   - ISC
 
+# GitHub reports typing-extensions (needed by pydantic) under a license string that
+# includes GPL-1.0-or-later, so allow it by name instead of widening allow-licenses.
+allow-dependencies-licenses:
+  - pkg:pypi/typing-extensions
+
 # Advisories to skip. Give each entry a comment saying why and until when, like:
 #   - GHSA-xxxx-xxxx-xxxx # not reachable from aa, until the fix ships in X 1.2
 allow-ghsas: []

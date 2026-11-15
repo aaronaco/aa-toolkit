@@ -9,6 +9,7 @@ A personal developer toolkit: the `aa` command plus small libraries, developed t
 | `packages/aa-toolkit-cli` | The `aa` command (import name `aa_cli`). |
 | `packages/aa-toolkit-log` | The log library (import name `aa_log`). See [its README](packages/aa-toolkit-log/README.md). |
 | `packages/aa-toolkit-redact` | The redaction library (import name `aa_redact`). See [its README](packages/aa-toolkit-redact/README.md). |
+| `packages/aa-toolkit-settings` | The Settings library (import name `aa_settings`). See [its README](packages/aa-toolkit-settings/README.md). |
 
 ## Install `aa` from this checkout
 
