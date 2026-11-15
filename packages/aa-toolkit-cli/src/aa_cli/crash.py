@@ -22,6 +22,7 @@ REVIEW_LINE = (
 REDACTION_FAILED = "[REDACTION FAILED]"
 KEEP_REPORTS = 10
 
+_SLASHES = r"[\\/]+"
 _REPORT_NAME = re.compile(r"^(\d{4}-\d{2}-\d{2}-\d{6})(?:-(\d+))?\.md$")
 
 
@@ -82,9 +83,9 @@ def _home_and_computer() -> Callable[[str], str]:
     path is replaced, never the bare user name, which would break ordinary words if short.
     """
     home_path = str(Path.home())
-    parts = [re.escape(part) for part in re.split(r"[\\/]+", home_path) if part]
-    lead = r"[\\/]+" if home_path[:1] in ("\\", "/") else ""
-    home = re.compile(lead + r"[\\/]+".join(parts) + r"(?![\w-])", re.IGNORECASE) if parts else None
+    parts = [re.escape(part) for part in re.split(_SLASHES, home_path) if part]
+    lead = _SLASHES if home_path[:1] in ("\\", "/") else ""
+    home = re.compile(lead + _SLASHES.join(parts) + r"(?![\w-])", re.IGNORECASE) if parts else None
     names = {name for name in (os.environ.get("COMPUTERNAME"), platform.node()) if name}
     computer = (
         re.compile(
