@@ -13,8 +13,11 @@ def test_the_package_is_aa_toolkit_settings_at_version_0_1_0():
     assert dist.version == "0.1.0"
 
 
-def test_the_package_depends_only_on_pydantic_settings():
-    assert distribution("aa-toolkit-settings").requires == ["pydantic-settings>=2.16.2"]
+def test_the_package_depends_only_on_pydantic_settings_and_keyring():
+    assert sorted(distribution("aa-toolkit-settings").requires or []) == [
+        "keyring>=25.7.0",
+        "pydantic-settings>=2.16.2",
+    ]
 
 
 def test_aa_settings_imports_from_the_package_folder(package_dir):
@@ -25,8 +28,11 @@ def test_the_public_names_are_the_settings_types_and_helpers():
     assert sorted(aa_settings.__all__) == [
         "BaseSettings",
         "Secret",
+        "SecretStoreError",
         "SettingsConfigDict",
         "SettingsError",
+        "delete_secret",
+        "save_secret",
         "secret_values",
     ]
 

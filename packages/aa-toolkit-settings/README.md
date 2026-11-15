@@ -2,7 +2,7 @@
 
 Settings and Secrets for apps, on top of [pydantic-settings](https://docs.pydantic.dev/latest/concepts/pydantic_settings/).
 
-An app describes its Settings as a typed class and loads them from values passed in code, environment variables, a `.env` file and defaults, in that order. A `Secret` prints and saves as `[REDACTED]` and reveals its real value only when code asks for it.
+An app describes its Settings as a typed class and loads them from values passed in code, environment variables, a `.env` file, the Secret store and defaults, in that order. A `Secret` prints and saves as `[REDACTED]` and reveals its real value only when code asks for it.
 
 ## Install
 
@@ -77,8 +77,9 @@ Each Setting is taken from the first place that has it:
 1. Values passed in code (`Settings(port=9000)`)
 2. Environment variables (matching the field name in any case, with no prefix by default)
 3. `.env` in the current folder (read as UTF-8; a missing `.env` or unknown keys in `.env` are ignored)
-4. `secrets_dir` (off unless set in `model_config`)
-5. The default on the class
+4. The Secret store (for `Secret` fields when `app_name` is set in `model_config`)
+5. `secrets_dir` (off unless set in `model_config`)
+6. The default on the class
 
 ```python
 from contextlib import chdir
@@ -145,6 +146,20 @@ api_key=Secret('[REDACTED]') pin=Secret('[REDACTED]')
 4242
 ```
 
+## Credential Manager
+
+On Windows, the Secret store is Credential Manager. Save a `Secret` there once so no `.env` file in your project has to hold it:
+
+```bash
+aa secret set api_key
+```
+
+Name your app once in `model_config = SettingsConfigDict(app_name="my-app")`. Only fields typed as `Secret[...]` (including `Secret[...] | None`) are read from the Secret store, and only when `app_name` is set. That `app_name` must match the name `aa secret set` uses: `[project].name` from `pyproject.toml` in the current folder, or the name passed to `--app`.
+
+Each `Secret` is stored under your `app_name` and the Python field name as written in the class (not an alias or environment variable name). On a machine with no Secret store (such as a Linux CI runner), the Settings library treats the store as empty and loads Settings from environment variables, `.env` and defaults.
+
+You can inspect or remove saved entries in **Control Panel** -> **Credential Manager** -> **Windows Credentials** (under `<app_name>` or `<field>@<app_name>`).
+
 ## Logging Settings with the log and redaction libraries
 
 The Settings library never imports [`aa-toolkit-log`](../aa-toolkit-log/README.md) or [`aa-toolkit-redact`](../aa-toolkit-redact/README.md). An app connects them when it starts and passes `secret_values(settings)` to `known_values()` so Secrets stay hidden even if a real value from `get_secret_value()` ends up in another message, and passwords inside plain text Settings such as `database_url` are redacted too:
@@ -181,6 +196,9 @@ When stderr isn't a terminal, that writes:
 
 ## What this library can't do
 
+- **Store values larger than 2560 bytes in Credential Manager.** Windows Credential Manager holds at most 2560 bytes per Secret (1280 ordinary characters or 640 emoji in UTF-16). A short Ed25519 private key file fits; an RSA private key file does not.
+- **Isolate saved Secrets from other programs you run.** Any program running as the same Windows user can read saved Secrets from Credential Manager.
+- **Guarantee Secret stores off Windows.** Only Windows is tested; elsewhere `keyring` picks macOS Keychain or the Linux Secret Service, untested.
 - **Keep values hidden after `get_secret_value()`.** Once code calls `get_secret_value()`, it holds the plain value and must keep it out of logs, errors and files itself.
 - **Hide passwords inside plain text Settings on its own.** A password inside a `str` Setting such as `postgres://app:hunter2@db.internal/app` is hidden only when the [redaction library](../aa-toolkit-redact/README.md) is attached.
 - **Hide input values echoed inside custom validator exceptions.** A `@field_validator` or `@model_validator` keeps its raised exception message, so validator code must not include raw values in that text.

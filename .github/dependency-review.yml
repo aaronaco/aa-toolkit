@@ -18,6 +18,9 @@ fail-on-scopes:
 # Don't switch to deny-licenses: v5 deprecates it.
 allow-licenses:
   - MIT
+  # MIT without the attribution clause. cffi (needed by cryptography, which keyring
+  # uses on Linux) is reported under it.
+  - MIT-0
   - BSD-2-Clause
   - BSD-2-Clause-Views
   - BSD-3-Clause

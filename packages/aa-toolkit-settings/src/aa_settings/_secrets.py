@@ -5,7 +5,8 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from dataclasses import fields as dataclass_fields
 from dataclasses import is_dataclass
-from typing import TYPE_CHECKING
+from types import UnionType
+from typing import TYPE_CHECKING, Annotated, Union, get_args, get_origin
 
 from pydantic import BaseModel, SecretBytes, SecretStr
 from pydantic import Secret as PydanticSecret
@@ -19,6 +20,18 @@ class Secret[T](PydanticSecret[T]):
 
     def _display(self) -> str:
         return "[REDACTED]"
+
+
+def is_secret_annotation(annotation: object) -> bool:
+    """Whether `annotation` is `Secret[...]` (or `Secret[...] | None`)."""
+    origin = get_origin(annotation)
+    if origin is Annotated:
+        return is_secret_annotation(get_args(annotation)[0])
+    if origin is Union or origin is UnionType:
+        branches = [arg for arg in get_args(annotation) if arg is not type(None)]
+        return bool(branches) and all(is_secret_annotation(branch) for branch in branches)
+    target = origin if origin is not None else annotation
+    return isinstance(target, type) and issubclass(target, Secret)
 
 
 def _extract_secret_text(secret: PydanticSecret[object] | SecretStr | SecretBytes) -> str:

@@ -4,7 +4,10 @@ version = "0.1.0"
 description = "Settings for apps, on top of pydantic-settings."
 readme = "README.md"
 requires-python = ">=3.14"
-dependencies = ["pydantic-settings>=2.16.2"]
+dependencies = [
+    "keyring>=25.7.0",
+    "pydantic-settings>=2.16.2",
+]
 
 [build-system]
 requires = ["uv_build>=0.13.7,<0.14"]
