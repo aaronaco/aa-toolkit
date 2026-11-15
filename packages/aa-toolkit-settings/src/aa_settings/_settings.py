@@ -46,11 +46,18 @@ class BaseSettings(PydanticBaseSettings):
             env_nested_delimiter = values.get("_env_nested_delimiter")
             if env_nested_delimiter is None:
                 env_nested_delimiter = config.get("env_nested_delimiter")
+            env_prefix_target = values.get("_env_prefix_target")
+            if env_prefix_target is None:
+                env_prefix_target = config.get("env_prefix_target", "variable")
+            validate_by_alias = config.get("validate_by_alias", True)
             error = build_settings_error_from_validation(
                 exc,
                 env_prefix=env_prefix,
                 case_sensitive=bool(case_sensitive),
                 env_nested_delimiter=env_nested_delimiter,
+                settings_cls=type(self),
+                env_prefix_target=str(env_prefix_target),
+                validate_by_alias=bool(validate_by_alias),
             )
         except PydanticSettingsError as exc:
             error = build_settings_error_from_source(exc)

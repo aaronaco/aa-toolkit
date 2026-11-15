@@ -121,3 +121,74 @@ def test_invalid_complex_env_value_raises_settings_error_with_no_cause_or_contex
     assert err.__context__ is None
     assert "secret-bad-json" not in str(err)
     assert "secret-bad-json" not in repr(err.problems)
+
+
+def test_dict_keys_are_redacted_from_error_locations(monkeypatch, tmp_path):
+    import json
+
+    from pydantic import BaseModel
+
+    monkeypatch.chdir(tmp_path)
+
+    class Endpoint(BaseModel):
+        port: int
+
+    class Settings(BaseSettings):
+        tokens: dict[str, int]
+        ports_by_int: dict[int, str]
+        endpoints: dict[str, Endpoint]
+
+    with pytest.raises(SettingsError) as exc_info:
+        Settings(
+            tokens={"sk-secret-key": "bad-val"},
+            ports_by_int=json.loads('{"sk-bad-int-key": "ok"}'),
+            endpoints={"sk-secret-host": {"port": "bad-port"}},
+        )
+
+    err = exc_info.value
+    rendered = f"{err}\n{err.problems!r}"
+    assert "sk-secret-key" not in rendered
+    assert "sk-bad-int-key" not in rendered
+    assert "sk-secret-host" not in rendered
+    assert [p["field"] for p in err.problems] == [
+        "tokens.[key]",
+        "ports_by_int.[key]",
+        "endpoints.[key].port",
+    ]
+
+
+def test_missing_field_hint_respects_alias_and_env_prefix_target(monkeypatch, tmp_path):
+    from pydantic import AliasChoices, Field
+
+    monkeypatch.chdir(tmp_path)
+
+    class AliasDefaultSettings(BaseSettings):
+        model_config = SettingsConfigDict(env_prefix="APP_")
+
+        database_url: str = Field(validation_alias="CUSTOM_DB")
+
+    class AliasPrefixedSettings(BaseSettings):
+        model_config = SettingsConfigDict(env_prefix="APP_", env_prefix_target="alias")
+
+        database_url: str = Field(validation_alias="CUSTOM_DB")
+
+    class MultiAliasSettings(BaseSettings):
+        model_config = SettingsConfigDict(env_prefix="APP_")
+
+        database_url: str = Field(validation_alias=AliasChoices("DB_A", "DB_B"))
+
+    with pytest.raises(SettingsError) as default_exc:
+        AliasDefaultSettings()
+    with pytest.raises(SettingsError) as prefixed_exc:
+        AliasPrefixedSettings()
+    with pytest.raises(SettingsError) as multi_exc:
+        MultiAliasSettings()
+
+    assert (
+        str(default_exc.value) == "CUSTOM_DB: missing. Set CUSTOM_DB in the environment or in .env"
+    )
+    assert (
+        str(prefixed_exc.value)
+        == "CUSTOM_DB: missing. Set APP_CUSTOM_DB in the environment or in .env"
+    )
+    assert str(multi_exc.value) == "DB_A: missing"
