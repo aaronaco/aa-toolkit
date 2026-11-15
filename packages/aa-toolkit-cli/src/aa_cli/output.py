@@ -11,7 +11,7 @@ import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import IntEnum
-from typing import Annotated, Any, TextIO
+from typing import Annotated, Any, Self, TextIO
 
 import typer
 
@@ -23,11 +23,19 @@ VerboseFlag = Annotated[bool, typer.Option("--verbose", help="Log debug details 
 
 
 class ExitCode(IntEnum):
-    OK = 0
-    PROBLEMS = 1
-    USAGE = 2
-    UNEXPECTED = 3
-    ABORTED = 130  # the shell convention for a command stopped by Ctrl+C
+    meaning: str
+
+    def __new__(cls, value: int, meaning: str) -> Self:
+        member = int.__new__(cls, value)
+        member._value_ = value
+        member.meaning = meaning
+        return member
+
+    OK = (0, "ok")
+    PROBLEMS = (1, "problems found")
+    USAGE = (2, "usage error")
+    UNEXPECTED = (3, "unexpected error")
+    ABORTED = (130, "stopped with Ctrl+C")  # the shell convention for a command stopped by Ctrl+C
 
 
 class Aborted(Exception):
