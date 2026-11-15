@@ -306,11 +306,20 @@ class _TerminalStdin(io.TextIOWrapper):
 
 
 class _Runner(CliRunner):
-    """A ``CliRunner`` whose ``sys.stdin`` is a terminal until ``input`` is passed."""
+    """A ``CliRunner`` whose ``sys.stdin`` is a terminal until ``input`` is passed.
+
+    ``typed`` is the text typed at a terminal prompt; the terminal itself stays empty.
+    """
+
+    def __init__(self, typed: str | None = None) -> None:
+        super().__init__()
+        self.typed = typed
 
     @contextlib.contextmanager
     def isolation(self, input=None, env=None, color=False):
-        with super().isolation(input=input, env=env, color=color) as streams:
+        # Click's prompts read from the stream given here, not from sys.stdin.
+        prompt_input = self.typed if input is None else input
+        with super().isolation(input=prompt_input, env=env, color=color) as streams:
             if input is None:
                 sys.stdin = _TerminalStdin(io.BytesIO(), encoding=self.charset)
             yield streams
@@ -320,6 +329,9 @@ class _Runner(CliRunner):
 def aa_in():
     """Run the aa command in process from ``cwd``; usable from fixtures of any scope.
 
+    ``stdin`` is piped text; without it standard input is a terminal, where ``typed``
+    is what a person types at a prompt.
+
     AA_JSON is cleared unless ``env`` sets it, so a developer's own setting never leaks in.
     """
 
@@ -328,9 +340,10 @@ def aa_in():
         *args: str,
         stdin: str | bytes | None = None,
         env: dict[str, str | None] | None = None,
+        typed: str | None = None,
     ):
         with contextlib.chdir(cwd):
-            return _Runner().invoke(
+            return _Runner(typed).invoke(
                 app,
                 list(args),
                 input=stdin,
@@ -359,7 +372,9 @@ def _no_ambient_json(monkeypatch):
 def aa(aa_in, tmp_path, monkeypatch):
     """Run the aa command in process from the current folder, at first an empty temporary one."""
     monkeypatch.chdir(tmp_path)
-    return lambda *args, stdin=None, env=None: aa_in(Path.cwd(), *args, stdin=stdin, env=env)
+    return lambda *args, stdin=None, env=None, typed=None: aa_in(
+        Path.cwd(), *args, stdin=stdin, env=env, typed=typed
+    )
 
 
 @pytest.fixture
