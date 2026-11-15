@@ -81,17 +81,23 @@ def test_secret_values_collects_nested_models_and_containers(monkeypatch, tmp_pa
 
     class Database(BaseModel):
         dsn: Secret[str]
+        optional_val: Secret[str | None] = Secret(None)
         empty: Secret[str] = Secret("")
 
     class Settings(BaseSettings):
         db: Database
+        shared_db: Database
         tokens: list[Secret[str]]
         named: dict[str, Secret[str]]
+        extra_pair: tuple[Secret[str], int]
 
+    shared = Database(dsn="db-secret")
     settings = Settings(
-        db=Database(dsn="db-secret"),
+        db=shared,
+        shared_db=shared,
         tokens=[Secret("tok-1"), Secret("")],
         named={"primary": Secret("named-secret")},
+        extra_pair=(Secret("tuple-secret"), 1),
     )
 
-    assert secret_values(settings) == ["db-secret", "tok-1", "named-secret"]
+    assert secret_values(settings) == ["db-secret", "tok-1", "named-secret", "tuple-secret"]

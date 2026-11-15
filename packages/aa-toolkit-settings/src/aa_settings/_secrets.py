@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, SecretBytes, SecretStr
@@ -19,39 +19,37 @@ class Secret[T](PydanticSecret[T]):
         return "[REDACTED]"
 
 
+def _extract_secret_text(secret: PydanticSecret[object] | SecretStr | SecretBytes) -> str:
+    raw = secret.get_secret_value()
+    if raw is None:
+        return ""
+    return raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
+
+
+def _iter_children(value: object) -> Iterable[object]:
+    if isinstance(value, BaseModel):
+        return (getattr(value, name) for name in type(value).model_fields)
+    if isinstance(value, Mapping):
+        return value.values()
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return value
+    return ()
+
+
 def _collect_secrets(value: object, values: list[str], seen: set[int]) -> None:
     if isinstance(value, (PydanticSecret, SecretStr, SecretBytes)):
-        raw = value.get_secret_value()
-        if raw is None:
-            return
-        text = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
+        text = _extract_secret_text(value)
         if text:
             values.append(text)
         return
 
     obj_id = id(value)
-    if isinstance(value, BaseModel):
-        if obj_id in seen:
-            return
-        seen.add(obj_id)
-        for name in type(value).model_fields:
-            _collect_secrets(getattr(value, name), values, seen)
+    if obj_id in seen:
         return
+    seen.add(obj_id)
 
-    if isinstance(value, Mapping):
-        if obj_id in seen:
-            return
-        seen.add(obj_id)
-        for item in value.values():
-            _collect_secrets(item, values, seen)
-        return
-
-    if isinstance(value, (list, tuple, set, frozenset)):
-        if obj_id in seen:
-            return
-        seen.add(obj_id)
-        for item in value:
-            _collect_secrets(item, values, seen)
+    for item in _iter_children(value):
+        _collect_secrets(item, values, seen)
 
 
 def secret_values(settings: BaseSettings) -> list[str]:

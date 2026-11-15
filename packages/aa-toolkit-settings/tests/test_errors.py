@@ -192,3 +192,109 @@ def test_missing_field_hint_respects_alias_and_env_prefix_target(monkeypatch, tm
         == "CUSTOM_DB: missing. Set APP_CUSTOM_DB in the environment or in .env"
     )
     assert str(multi_exc.value) == "DB_A: missing"
+
+
+def test_missing_nested_field_under_dict_key_omits_hint_and_redacts_key(monkeypatch, tmp_path):
+    import json
+
+    from pydantic import BaseModel
+
+    monkeypatch.chdir(tmp_path)
+
+    class Endpoint(BaseModel):
+        port: int
+
+    class Settings(BaseSettings):
+        model_config = SettingsConfigDict(env_nested_delimiter="__", case_sensitive=True)
+
+        endpoints: dict[str, Endpoint]
+
+    with pytest.raises(SettingsError) as exc_info:
+        Settings(endpoints=json.loads('{"sk-secret-host": {}}'))
+
+    err = exc_info.value
+    rendered = f"{err}\n{err.problems!r}"
+    assert "sk-secret-host" not in rendered
+    assert str(err) == "endpoints.[key].port: missing"
+    assert err.problems == [
+        {"field": "endpoints.[key].port", "type": "missing", "message": "missing"}
+    ]
+
+
+def test_sanitization_and_hints_for_containers_unions_nested_models_and_root_errors(
+    monkeypatch, tmp_path
+):
+    import json
+    from typing import Annotated
+
+    from pydantic import AliasPath, BaseModel, Field, model_validator
+
+    monkeypatch.chdir(tmp_path)
+
+    class Endpoint(BaseModel):
+        port: int
+
+    class NestedSettings(BaseSettings):
+        model_config = SettingsConfigDict(env_prefix="APP_", env_nested_delimiter="__")
+
+        db: Endpoint
+        path_field: str = Field(validation_alias=AliasPath("nested", "key"))
+        annotated_map: Annotated[dict[str, int] | None, "meta"] = None
+        items: list[Endpoint] = []
+        pair: tuple[int, Endpoint] = (1, Endpoint(port=80))
+        variadic: tuple[Endpoint, ...] = ()
+
+    with pytest.raises(SettingsError) as exc_info:
+        NestedSettings(
+            db=json.loads("{}"),
+            annotated_map=json.loads('{"sk-annotated-key": "bad"}'),
+            items=[json.loads('{"port": "bad"}')],
+            pair=json.loads('[1, {"port": "bad"}]'),
+            variadic=(json.loads('{"port": "bad"}'),),
+        )
+
+    err = exc_info.value
+    rendered = f"{err}\n{err.problems!r}"
+    assert "sk-annotated-key" not in rendered
+    assert {
+        "field": "db.port",
+        "type": "missing",
+        "message": "missing. Set APP_DB__PORT in the environment or in .env",
+    } in err.problems
+    assert {"field": "nested.key", "type": "missing", "message": "missing"} in err.problems
+    assert any(
+        p["field"] == "annotated_map.[key]" and p["type"] == "int_parsing" for p in err.problems
+    )
+    assert any(p["field"] == "items.0.port" for p in err.problems)
+    assert any(p["field"] == "pair.1.port" for p in err.problems)
+    assert any(p["field"] == "variadic.0.port" for p in err.problems)
+
+    class ByNameSettings(BaseSettings):
+        model_config = SettingsConfigDict(env_prefix="APP_", validate_by_alias=False)
+
+        by_name_only: str = Field(validation_alias="IGNORED_ALIAS")
+
+    with pytest.raises(SettingsError) as by_name_exc:
+        ByNameSettings()
+
+    assert (
+        str(by_name_exc.value)
+        == "by_name_only: missing. Set APP_BY_NAME_ONLY in the environment or in .env"
+    )
+
+    from typing import Self
+
+    class RootFailSettings(BaseSettings):
+        value: int = 1
+
+        @model_validator(mode="after")
+        def check_root(self) -> Self:
+            if self.value == 1:
+                raise ValueError("invalid root combination")
+            return self
+
+    with pytest.raises(SettingsError) as root_exc:
+        RootFailSettings()
+
+    assert str(root_exc.value) == "Value error, invalid root combination"
+    assert root_exc.value.problems[0]["field"] == ""

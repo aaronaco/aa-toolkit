@@ -36,24 +36,71 @@ def _unwrap_types(annotation: object) -> list[object]:
     return [annotation]
 
 
+def _alias_matches_key(alias_spec: object, key: str) -> bool:
+    if alias_spec == key:
+        return True
+    if isinstance(alias_spec, AliasPath):
+        return bool(alias_spec.path) and alias_spec.path[0] == key
+    if isinstance(alias_spec, AliasChoices):
+        return any(_alias_matches_key(choice, key) for choice in alias_spec.choices)
+    return False
+
+
 def _lookup_field(model_cls: type[BaseModel], key: int | str) -> tuple[str, FieldInfo] | None:
     if not isinstance(key, str):
         return None
     if key in model_cls.model_fields:
         return key, model_cls.model_fields[key]
     for name, field in model_cls.model_fields.items():
-        if field.validation_alias == key or field.alias == key:
+        if _alias_matches_key(field.validation_alias, key) or field.alias == key:
             return name, field
-        val_alias = field.validation_alias
-        if isinstance(val_alias, AliasPath) and val_alias.path and val_alias.path[0] == key:
-            return name, field
-        if isinstance(val_alias, AliasChoices):
-            for choice in val_alias.choices:
-                if choice == key or (
-                    isinstance(choice, AliasPath) and choice.path and choice.path[0] == key
-                ):
-                    return name, field
     return None
+
+
+def _match_model_field(candidates: list[object], part: int | str) -> list[object] | None:
+    for cand in candidates:
+        if isinstance(cand, type) and issubclass(cand, BaseModel):
+            found = _lookup_field(cand, part)
+            if found is not None:
+                return _unwrap_types(found[1].annotation)
+    return None
+
+
+def _tuple_element_types(args: tuple[object, ...], index: int) -> list[object]:
+    if len(args) == 2 and args[1] is Ellipsis:
+        return _unwrap_types(args[0])
+    if 0 <= index < len(args):
+        return _unwrap_types(args[index])
+    return []
+
+
+def _match_sequence_element(candidates: list[object], index: int) -> list[object] | None:
+    for cand in candidates:
+        orig = get_origin(cand) or cand
+        if not (
+            isinstance(orig, type)
+            and issubclass(orig, _SEQUENCE_ORIGINS)
+            and not issubclass(orig, (str, bytes))
+        ):
+            continue
+        args = get_args(cand)
+        if issubclass(orig, tuple):
+            return _tuple_element_types(args, index)
+        return _unwrap_types(args[0]) if args else []
+    return None
+
+
+def _match_mapping_value(candidates: list[object]) -> list[object] | None:
+    map_val_candidates: list[object] = []
+    matched_mapping = False
+    for cand in candidates:
+        orig = get_origin(cand) or cand
+        if isinstance(orig, type) and issubclass(orig, Mapping):
+            matched_mapping = True
+            args = get_args(cand)
+            if len(args) >= 2:
+                map_val_candidates.extend(_unwrap_types(args[1]))
+    return map_val_candidates if matched_mapping else None
 
 
 def _sanitize_loc_from_candidates(
@@ -65,49 +112,21 @@ def _sanitize_loc_from_candidates(
         return []
     part = loc[idx]
 
-    for cand in candidates:
-        if isinstance(cand, type) and issubclass(cand, BaseModel):
-            found = _lookup_field(cand, part)
-            if found is not None:
-                _, field = found
-                return [
-                    part,
-                    *_sanitize_loc_from_candidates(loc, idx + 1, _unwrap_types(field.annotation)),
-                ]
+    next_candidates = _match_model_field(candidates, part)
+    if next_candidates is not None:
+        return [part, *_sanitize_loc_from_candidates(loc, idx + 1, next_candidates)]
 
     if isinstance(part, int):
-        seq_elem_candidates: list[object] = []
-        for cand in candidates:
-            orig = get_origin(cand) or cand
-            if (
-                isinstance(orig, type)
-                and issubclass(orig, _SEQUENCE_ORIGINS)
-                and not issubclass(orig, (str, bytes))
-            ):
-                args = get_args(cand)
-                if issubclass(orig, tuple):
-                    if len(args) == 2 and args[1] is Ellipsis:
-                        seq_elem_candidates.extend(_unwrap_types(args[0]))
-                    elif 0 <= part < len(args):
-                        seq_elem_candidates.extend(_unwrap_types(args[part]))
-                elif args:
-                    seq_elem_candidates.extend(_unwrap_types(args[0]))
-                return [part, *_sanitize_loc_from_candidates(loc, idx + 1, seq_elem_candidates)]
+        elem_candidates = _match_sequence_element(candidates, part)
+        if elem_candidates is not None:
+            return [part, *_sanitize_loc_from_candidates(loc, idx + 1, elem_candidates)]
 
-    map_val_candidates: list[object] = []
-    matched_mapping = False
-    for cand in candidates:
-        orig = get_origin(cand) or cand
-        if isinstance(orig, type) and issubclass(orig, Mapping):
-            matched_mapping = True
-            args = get_args(cand)
-            if len(args) >= 2:
-                map_val_candidates.extend(_unwrap_types(args[1]))
-    if matched_mapping:
+    map_candidates = _match_mapping_value(candidates)
+    if map_candidates is not None:
         next_idx = idx + 1
         if next_idx < len(loc) and loc[next_idx] == "[key]":
             next_idx += 1
-        return ["[key]", *_sanitize_loc_from_candidates(loc, next_idx, map_val_candidates)]
+        return ["[key]", *_sanitize_loc_from_candidates(loc, next_idx, map_candidates)]
 
     return list(loc[idx:])
 
@@ -159,6 +178,25 @@ def _resolve_field_chain(
     return chain
 
 
+def _resolve_env_parts(
+    chain: list[tuple[str, FieldInfo]],
+    env_prefix_target: str,
+    validate_by_alias: bool,
+) -> tuple[list[str], bool] | None:
+    raw_parts: list[str] = []
+    apply_prefix = env_prefix_target in ("variable", "all")
+    for idx, (field_name, field) in enumerate(chain):
+        alias_spec = field.validation_alias if field.validation_alias is not None else field.alias
+        if validate_by_alias and isinstance(alias_spec, (AliasChoices, AliasPath)):
+            return None
+        use_alias = validate_by_alias and isinstance(alias_spec, str)
+        raw_parts.append(str(alias_spec) if use_alias else field_name)
+        if idx == 0:
+            target = ("alias", "all") if use_alias else ("variable", "all")
+            apply_prefix = env_prefix_target in target
+    return raw_parts, apply_prefix
+
+
 def _env_var_name(
     loc: tuple[int | str, ...],
     env_prefix: str,
@@ -177,22 +215,12 @@ def _env_var_name(
 
     if settings_cls is not None:
         chain = _resolve_field_chain(loc, settings_cls)
-        if chain is not None:
-            raw_parts = []
-            for idx, (field_name, field) in enumerate(chain):
-                alias_spec = (
-                    field.validation_alias if field.validation_alias is not None else field.alias
-                )
-                if validate_by_alias and isinstance(alias_spec, (AliasChoices, AliasPath)):
-                    return None
-                if validate_by_alias and isinstance(alias_spec, str):
-                    raw_parts.append(alias_spec)
-                    if idx == 0:
-                        apply_prefix = env_prefix_target in ("alias", "all")
-                else:
-                    raw_parts.append(field_name)
-                    if idx == 0:
-                        apply_prefix = env_prefix_target in ("variable", "all")
+        if chain is None:
+            return None
+        resolved = _resolve_env_parts(chain, env_prefix_target, validate_by_alias)
+        if resolved is None:
+            return None
+        raw_parts, apply_prefix = resolved
 
     raw_name = raw_parts[0] if len(raw_parts) == 1 else (env_nested_delimiter or "").join(raw_parts)
     full_name = f"{env_prefix}{raw_name}" if apply_prefix else raw_name
