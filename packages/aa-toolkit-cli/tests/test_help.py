@@ -35,6 +35,16 @@ def test_help_lists_init_and_not_doctor(aa, color_forced):
     assert "doctor" not in text
 
 
+def test_help_lists_add_and_add_help_names_valid_pieces(aa, color_forced):
+    root_help = aa("--help")
+    add_help = aa("add", "--help")
+
+    assert root_help.exit_code == 0
+    assert "add" in ANSI_ESCAPE.sub("", root_help.stdout)
+    assert add_help.exit_code == 0
+    assert "ci" in ANSI_ESCAPE.sub("", add_help.stdout)
+
+
 @pytest.mark.parametrize(
     ("args", "env"),
     [
