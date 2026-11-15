@@ -1,11 +1,14 @@
 """The Crash report module on its own, with cleaning functions that do nothing or misbehave."""
 
+import ast
 import platform
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
 
+from aa_cli import crash
 from aa_cli.crash import REDACTION_FAILED, REVIEW_LINE, crash_folder, save_report
 
 NOW = datetime(2026, 11, 16, 14, 12, 5)
@@ -167,10 +170,10 @@ def test_keeping_the_newest_ten_leaves_other_files_in_the_folder_alone(tmp_path)
     assert len(list(tmp_path.glob("2026-*.md"))) == 10
 
 
-def test_the_crash_folder_is_under_localappdata():
-    folder = crash_folder("aa", {"LOCALAPPDATA": "C:\\Users\\me\\AppData\\Local"})
+def test_the_crash_folder_is_under_localappdata(tmp_path):
+    folder = crash_folder("aa", {"LOCALAPPDATA": str(tmp_path)})
 
-    assert folder == Path("C:\\Users\\me\\AppData\\Local") / "aa" / "crash"
+    assert folder == tmp_path / "aa" / "crash"
 
 
 @pytest.mark.parametrize("environ", [{}, {"LOCALAPPDATA": ""}, {"LOCALAPPDATA": "relative"}])
@@ -178,3 +181,82 @@ def test_without_a_usable_localappdata_the_crash_folder_is_under_the_home_folder
     folder = crash_folder("aa", environ)
 
     assert folder == Path.home() / "AppData" / "Local" / "aa" / "crash"
+
+
+def test_a_home_folder_that_starts_with_a_slash_is_hidden_with_its_slash(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: cls("/home/runner")))
+    exc = failing(RuntimeError("cannot open /home/runner/.cache"))
+
+    text = save(tmp_path, exc).read_text(encoding="utf-8")
+
+    assert "cannot open [HOME]/.cache" in text
+
+
+def test_more_than_eleven_crashes_in_the_same_second_each_keep_their_report(tmp_path):
+    saved = [save(tmp_path, failing(RuntimeError(f"crash {n}"))) for n in range(13)]
+
+    assert sorted(tmp_path.iterdir()) == sorted(saved[-10:])
+
+
+def test_a_report_saved_after_the_clock_moved_back_is_kept(tmp_path):
+    for n in range(10):
+        save(tmp_path, failing(RuntimeError("later")), now=NOW + timedelta(hours=1, seconds=n))
+
+    path = save(tmp_path, failing(RuntimeError("now")), now=NOW)
+
+    assert path.exists()
+    assert len(list(tmp_path.iterdir())) == 10
+
+
+def test_a_report_that_fails_to_write_leaves_no_partial_file(tmp_path, monkeypatch):
+    real_open = Path.open
+
+    class FullDisk:
+        def __init__(self, file):
+            self.file = file
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc_info):
+            self.file.close()
+
+        def write(self, text):
+            raise OSError("disk full")
+
+    monkeypatch.setattr(Path, "open", lambda self, *a, **k: FullDisk(real_open(self, *a, **k)))
+
+    with pytest.raises(OSError, match="disk full"):
+        save(tmp_path, failing(RuntimeError("boom")))
+
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_text_that_isnt_valid_unicode_still_saves_a_report(tmp_path):
+    path = save(tmp_path, failing(RuntimeError("bad name \udcff.txt")))
+
+    assert "bad name" in path.read_text(encoding="utf-8")
+
+
+def test_a_folder_that_cant_be_listed_still_returns_the_saved_report(tmp_path, monkeypatch):
+    def refuse(self):
+        raise PermissionError("cannot list")
+
+    monkeypatch.setattr(Path, "iterdir", refuse)
+
+    path = save(tmp_path, failing(RuntimeError("boom")))
+
+    assert path.exists()
+
+
+def test_the_report_module_imports_only_the_standard_library():
+    tree = ast.parse(Path(crash.__file__).read_text(encoding="utf-8"))
+    imports = [node for node in ast.walk(tree) if isinstance(node, ast.Import | ast.ImportFrom)]
+    names = [
+        alias.name if isinstance(node, ast.Import) else (node.module or "")
+        for node in imports
+        for alias in node.names
+    ]
+
+    assert all(isinstance(node, ast.Import) or node.level == 0 for node in imports)
+    assert {name.split(".")[0] for name in names} <= sys.stdlib_module_names

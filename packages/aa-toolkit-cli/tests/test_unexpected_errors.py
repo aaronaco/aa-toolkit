@@ -174,9 +174,9 @@ def test_a_redactor_that_raises_hides_the_message_and_still_saves_a_report(
     assert result.exit_code == 3
     error = json.loads(result.stdout)["error"]
     assert error["message"] == "[REDACTION FAILED]"
-    text = only_report(crash_folder).read_text(encoding="utf-8")
-    assert "aa crash was asked to fail" not in text
-    assert error["fix"].startswith("Attach ")
+    report = only_report(crash_folder)
+    assert "aa crash was asked to fail" not in report.read_text(encoding="utf-8")
+    assert error["fix"] == f"Attach {report} to a bug report"
 
 
 def test_a_redactor_that_cannot_be_built_hides_the_message_and_still_saves_a_report(

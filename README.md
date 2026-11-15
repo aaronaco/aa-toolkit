@@ -245,7 +245,7 @@ Every `aa` command follows the same rules, so scripts and AI agents can rely on 
 | `cannot_read` | `1` | `aa redact` was given a folder or a file that cannot be read. The message says why. |
 | `usage` | `2` | Bad or conflicting flags, a missing argument, an `aa init` name that breaks the name rule, or `aa redact` with no file and a terminal for standard input. Nothing was created. |
 | `aborted` | `130` | Ctrl+C stopped the command. When `aa init` had started writing, the message says the folder was left as it is. |
-| `unexpected` | `3` | An uncaught error, such as uv, git or gh missing from PATH. `fix` names the Crash report saved for it (see the CLI README). Rerun with `--verbose` for the traceback. |
+| `unexpected` | `3` | An uncaught error, such as uv, git or gh missing from PATH. `fix` names the Crash report saved for it (see the CLI README), or is null when the report can't be saved. Rerun with `--verbose` for the traceback. |
 
 ## Security
 

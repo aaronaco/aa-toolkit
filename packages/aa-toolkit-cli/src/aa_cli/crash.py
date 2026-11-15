@@ -20,9 +20,9 @@ REVIEW_LINE = (
     " Sensitive values were replaced, but no tool catches everything."
 )
 REDACTION_FAILED = "[REDACTION FAILED]"
-KEEP = 10
+KEEP_REPORTS = 10
 
-_NAME = re.compile(r"^(\d{4}-\d{2}-\d{2}-\d{6})(?:-(\d+))?\.md$")
+_REPORT_NAME = re.compile(r"^(\d{4}-\d{2}-\d{2}-\d{6})(?:-(\d+))?\.md$")
 
 
 def crash_folder(app: str, environ: Mapping[str, str] = os.environ) -> Path:
@@ -51,7 +51,7 @@ def save_report(
 
     ``command`` is the subcommand's name only, never its arguments. ``message`` and the
     traceback go through ``redact`` each on its own, after the home folder and computer name
-    are replaced. Only the newest ``KEEP`` reports stay.
+    are replaced. Only the newest ``KEEP_REPORTS`` reports stay.
     """
     hide = _home_and_computer()
     details = traceback.format_exception(exc)
@@ -71,7 +71,7 @@ def save_report(
     ]
     folder.mkdir(parents=True, exist_ok=True)
     path = _write_new(folder, (now or datetime.now()).strftime("%Y-%m-%d-%H%M%S"), "\n".join(lines))
-    _keep_newest(folder)
+    _keep_newest(folder, path)
     return path
 
 
@@ -81,8 +81,10 @@ def _home_and_computer() -> Callable[[str], str]:
     Both match any letter case, and the home path matches with either slash. The whole home
     path is replaced, never the bare user name, which would break ordinary words if short.
     """
-    parts = [re.escape(part) for part in re.split(r"[\\/]+", str(Path.home())) if part]
-    home = re.compile(r"[\\/]+".join(parts) + r"(?![\w-])", re.IGNORECASE) if parts else None
+    home_path = str(Path.home())
+    parts = [re.escape(part) for part in re.split(r"[\\/]+", home_path) if part]
+    lead = r"[\\/]+" if home_path[:1] in ("\\", "/") else ""
+    home = re.compile(lead + r"[\\/]+".join(parts) + r"(?![\w-])", re.IGNORECASE) if parts else None
     names = {name for name in (os.environ.get("COMPUTERNAME"), platform.node()) if name}
     computer = (
         re.compile(
@@ -114,26 +116,52 @@ def _clean(text: str, hide: Callable[[str], str], redact: Callable[[str], str]) 
 
 
 def _write_new(folder: Path, stamp: str, text: str) -> Path:
-    """Write ``text`` to a new file named by ``stamp``, adding -2, -3 and so on if it's taken."""
-    for count in range(1, 1000):
+    """Write ``text`` to a new file named by ``stamp``, adding -2, -3 and so on after the last one.
+
+    Text that isn't valid Unicode, such as a file name read with surrogate escapes, is written
+    with backslash escapes. A file that fails partway is removed.
+    """
+    for count in range(_next_count(folder, stamp), 1000):
         path = folder / (f"{stamp}.md" if count == 1 else f"{stamp}-{count}.md")
         try:
-            with path.open("x", encoding="utf-8") as file:
-                file.write(text)
+            file = path.open("x", encoding="utf-8", errors="backslashreplace")
         except FileExistsError:
             continue
+        try:
+            with file:
+                file.write(text)
+        except BaseException:
+            path.unlink(missing_ok=True)
+            raise
         return path
     raise FileExistsError(f"too many crash reports named {stamp}")
 
 
-def _keep_newest(folder: Path) -> None:
+def _reports(folder: Path) -> list[tuple[str, int, Path]]:
+    """Every Crash report in ``folder`` as (stamp, count, path), oldest first."""
     reports: list[tuple[str, int, Path]] = []
     for path in folder.iterdir():
-        match = _NAME.match(path.name)
+        match = _REPORT_NAME.match(path.name)
         if match and path.is_file():
             reports.append((match[1], int(match[2] or 1), path))
-    reports.sort()
-    for *_, path in reports[:-KEEP]:
-        # The new report is saved; an old one that can't be removed is left behind.
+    return sorted(reports)
+
+
+def _next_count(folder: Path, stamp: str) -> int:
+    try:
+        counts = [count for name, count, _ in _reports(folder) if name == stamp]
+    except OSError:
+        return 1
+    return max(counts, default=0) + 1
+
+
+def _keep_newest(folder: Path, saved: Path) -> None:
+    """Remove all but the newest ``KEEP_REPORTS``, never ``saved``, and never fail."""
+    try:
+        others = [path for *_, path in _reports(folder) if path != saved]
+    except OSError:
+        return
+    for path in others[: max(len(others) - (KEEP_REPORTS - 1), 0)]:
+        # An old report that can't be removed is left behind.
         with contextlib.suppress(OSError):
             path.unlink()
