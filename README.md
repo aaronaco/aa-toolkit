@@ -44,7 +44,7 @@ The name is also the folder and the package name, so it must start with a letter
 
 A project is always its own uv workspace. When you run `aa init` inside another uv workspace whose `members` would include the new folder, `aa init` stops before creating anything and tells you which `exclude` entry to add, because uv would otherwise take the project in as a member and break the outer lock.
 
-Add `--dry-run` to run the same validation and print the files and commands `aa init` would create and run, without writing anything or running any outside command. With `--json`, `data` includes `"dry_run": true` and `steps`.
+Add `--dry-run` to run the same validation (reading `git config` for `user.name` when adding an MIT LICENSE) and print the files and commands `aa init` would create and run, without writing anything or running any setup command. With `--json`, `data` includes `"dry_run": true` and `steps`.
 
 ```bash
 aa init my-app
@@ -239,7 +239,7 @@ Every `aa` command follows the same rules, so scripts and AI agents can rely on 
 |---|---|---|
 | `target_not_empty` | `1` | `aa init` found the target folder already has something in it. Nothing was changed. |
 | `target_in_workspace` | `1` | `aa init` found an outer uv workspace whose `members` would include the target. The fix names the `exclude` entry to add. Nothing was changed. |
-| `step_failed` | `1` | An `aa init` step failed. The message names the step and what went wrong. The folder is left as it is, and the message says to delete it before running `aa init` again. When creating the GitHub repo fails, the fix is the `gh repo create` command to rerun from inside the project, or `git push --set-upstream origin main` when the repo was created and only the push failed. |
+| `step_failed` | `1` | An `aa init` step failed. The message names the step and what went wrong. When `aa init` had started writing, the folder is left as it is and the message says to delete it before running `aa init` again; a missing git `user.name` fails before anything is written. When creating the GitHub repo fails, the fix is the `gh repo create` command to rerun from inside the project, or `git push --set-upstream origin main` when the repo was created and only the push failed. |
 | `file_not_found` | `1` | `aa redact` was given a file path that does not exist. The message names the path. |
 | `cannot_read` | `1` | `aa redact` was given a folder or a file that cannot be read. The message says why. |
 | `usage` | `2` | Bad or conflicting flags, a missing argument, an `aa init` name that breaks the name rule, or `aa redact` with no file and a terminal for standard input. Nothing was created. |
