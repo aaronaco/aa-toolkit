@@ -298,3 +298,63 @@ def test_sanitization_and_hints_for_containers_unions_nested_models_and_root_err
 
     assert str(root_exc.value) == "Value error, invalid root combination"
     assert root_exc.value.problems[0]["field"] == ""
+
+
+def test_alias_path_and_multi_branch_unions_redact_dict_keys(monkeypatch, tmp_path):
+    import json
+    from typing import Annotated, Literal
+
+    from pydantic import AliasChoices, AliasPath, BaseModel, Field
+
+    monkeypatch.chdir(tmp_path)
+
+    class Endpoint(BaseModel):
+        port: int
+
+    class TaggedMap(BaseModel):
+        kind: Literal["map"]
+        tokens: dict[str, int]
+
+    class TaggedList(BaseModel):
+        kind: Literal["list"]
+        items: list[int]
+
+    class Settings(BaseSettings):
+        ap_tokens: dict[str, int] = Field(validation_alias=AliasPath("payload", "tokens"))
+        ac_tokens: dict[str, int] = Field(
+            validation_alias=AliasChoices("alt", AliasPath("wrap", "map"))
+        )
+        map_or_list: dict[str, int] | list[int]
+        model_or_map: Endpoint | dict[str, int]
+        tagged: Annotated[TaggedMap | TaggedList, Field(discriminator="kind")]
+
+    payload = json.dumps(
+        {
+            "payload": {"tokens": {"sk-ap-secret": "bad"}},
+            "wrap": {"map": {"sk-ac-secret": "bad"}},
+            "map_or_list": {"sk-union-secret": "bad"},
+            "model_or_map": {"sk-collision-secret": "bad", "port": "bad"},
+            "tagged": {"kind": "map", "tokens": {"sk-tagged-secret": "bad"}},
+        }
+    )
+
+    with pytest.raises(SettingsError) as exc_info:
+        Settings(**json.loads(payload))
+
+    err = exc_info.value
+    rendered = f"{err}\n{err.problems!r}"
+    for secret_key in (
+        "sk-ap-secret",
+        "sk-ac-secret",
+        "sk-union-secret",
+        "sk-collision-secret",
+        "sk-tagged-secret",
+    ):
+        assert secret_key not in rendered
+
+    fields = [p["field"] for p in err.problems]
+    assert "payload.tokens.[key]" in fields
+    assert "wrap.map.[key]" in fields
+    assert "map_or_list.dict[str,int].[key]" in fields
+    assert "model_or_map.dict[str,int].[key]" in fields
+    assert "tagged.map.tokens.[key]" in fields

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from types import UnionType
-from typing import TYPE_CHECKING, Annotated, TypedDict, Union, get_args, get_origin
+from typing import TYPE_CHECKING, Annotated, Literal, TypedDict, Union, get_args, get_origin
 
 from pydantic import AliasChoices, AliasPath, BaseModel
 from pydantic import Secret as PydanticSecret
@@ -36,34 +36,84 @@ def _unwrap_types(annotation: object) -> list[object]:
     return [annotation]
 
 
-def _alias_matches_key(alias_spec: object, key: str) -> bool:
-    if alias_spec == key:
-        return True
-    if isinstance(alias_spec, AliasPath):
-        return bool(alias_spec.path) and alias_spec.path[0] == key
-    if isinstance(alias_spec, AliasChoices):
-        return any(_alias_matches_key(choice, key) for choice in alias_spec.choices)
+def _match_alias_choice(choice: object, loc: tuple[int | str, ...], idx: int) -> int:
+    if isinstance(choice, AliasPath):
+        size = len(choice.path)
+        if size > 0 and tuple(loc[idx : idx + size]) == tuple(choice.path):
+            return size
+        return 0
+    return 1 if isinstance(loc[idx], str) and choice == loc[idx] else 0
+
+
+def _field_alias_consume_len(
+    field: FieldInfo,
+    loc: tuple[int | str, ...],
+    idx: int,
+) -> int:
+    val_alias = field.validation_alias
+    if isinstance(val_alias, AliasChoices):
+        for choice in val_alias.choices:
+            if consumed := _match_alias_choice(choice, loc, idx):
+                return consumed
+        return 0
+    if val_alias is not None:
+        return _match_alias_choice(val_alias, loc, idx)
+    return 1 if isinstance(loc[idx], str) and field.alias == loc[idx] else 0
+
+
+def _lookup_field_step(
+    model_cls: type[BaseModel],
+    loc: tuple[int | str, ...],
+    idx: int,
+) -> tuple[str, FieldInfo, int] | None:
+    part = loc[idx]
+    if isinstance(part, str) and part in model_cls.model_fields:
+        return part, model_cls.model_fields[part], 1
+    for name, field in model_cls.model_fields.items():
+        consumed = _field_alias_consume_len(field, loc, idx)
+        if consumed > 0:
+            return name, field, consumed
+    return None
+
+
+def _match_model_field(
+    candidates: list[object],
+    loc: tuple[int | str, ...],
+    idx: int,
+) -> tuple[int, list[object]] | None:
+    for cand in candidates:
+        if isinstance(cand, type) and issubclass(cand, BaseModel):
+            found = _lookup_field_step(cand, loc, idx)
+            if found is not None:
+                _, field, consumed = found
+                return consumed, _unwrap_types(field.annotation)
+    return None
+
+
+def _model_has_literal_tag(model_cls: type[BaseModel], tag: str) -> bool:
+    for field in model_cls.model_fields.values():
+        for arg in _unwrap_types(field.annotation):
+            if get_origin(arg) is Literal and tag in get_args(arg):
+                return True
     return False
 
 
-def _lookup_field(model_cls: type[BaseModel], key: int | str) -> tuple[str, FieldInfo] | None:
-    if not isinstance(key, str):
-        return None
-    if key in model_cls.model_fields:
-        return key, model_cls.model_fields[key]
-    for name, field in model_cls.model_fields.items():
-        if _alias_matches_key(field.validation_alias, key) or field.alias == key:
-            return name, field
-    return None
+def _branch_matches_label(cand: object, label: str) -> bool:
+    orig = get_origin(cand) or cand
+    if isinstance(orig, type):
+        type_prefix = label.split("[", 1)[0]
+        if orig.__name__ == type_prefix:
+            return True
+        if issubclass(orig, BaseModel):
+            return _model_has_literal_tag(orig, label)
+    return False
 
 
-def _match_model_field(candidates: list[object], part: int | str) -> list[object] | None:
-    for cand in candidates:
-        if isinstance(cand, type) and issubclass(cand, BaseModel):
-            found = _lookup_field(cand, part)
-            if found is not None:
-                return _unwrap_types(found[1].annotation)
-    return None
+def _select_union_branches(branches: list[object], label: int | str) -> list[object]:
+    if not isinstance(label, str):
+        return branches
+    matched = [cand for cand in branches if _branch_matches_label(cand, label)]
+    return matched or branches
 
 
 def _tuple_element_types(args: tuple[object, ...], index: int) -> list[object]:
@@ -107,26 +157,43 @@ def _sanitize_loc_from_candidates(
     loc: tuple[int | str, ...],
     idx: int,
     candidates: list[object],
+    *,
+    in_union: bool = False,
 ) -> list[int | str]:
     if idx >= len(loc):
         return []
     part = loc[idx]
 
-    next_candidates = _match_model_field(candidates, part)
-    if next_candidates is not None:
-        return [part, *_sanitize_loc_from_candidates(loc, idx + 1, next_candidates)]
+    if in_union:
+        branches = _select_union_branches(candidates, part)
+        return [part, *_sanitize_loc_from_candidates(loc, idx + 1, branches, in_union=False)]
+
+    field_match = _match_model_field(candidates, loc, idx)
+    if field_match is not None:
+        consumed, next_candidates = field_match
+        kept = list(loc[idx : idx + consumed])
+        tail = _sanitize_loc_from_candidates(
+            loc, idx + consumed, next_candidates, in_union=len(next_candidates) > 1
+        )
+        return [*kept, *tail]
 
     if isinstance(part, int):
         elem_candidates = _match_sequence_element(candidates, part)
         if elem_candidates is not None:
-            return [part, *_sanitize_loc_from_candidates(loc, idx + 1, elem_candidates)]
+            tail = _sanitize_loc_from_candidates(
+                loc, idx + 1, elem_candidates, in_union=len(elem_candidates) > 1
+            )
+            return [part, *tail]
 
     map_candidates = _match_mapping_value(candidates)
     if map_candidates is not None:
         next_idx = idx + 1
         if next_idx < len(loc) and loc[next_idx] == "[key]":
             next_idx += 1
-        return ["[key]", *_sanitize_loc_from_candidates(loc, next_idx, map_candidates)]
+        tail = _sanitize_loc_from_candidates(
+            loc, next_idx, map_candidates, in_union=len(map_candidates) > 1
+        )
+        return ["[key]", *tail]
 
     return list(loc[idx:])
 
@@ -164,17 +231,20 @@ def _resolve_field_chain(
 ) -> list[tuple[str, FieldInfo]] | None:
     current_candidates: list[object] = [settings_cls]
     chain: list[tuple[str, FieldInfo]] = []
-    for part in loc:
-        found: tuple[str, FieldInfo] | None = None
+    idx = 0
+    while idx < len(loc):
+        step: tuple[str, FieldInfo, int] | None = None
         for cand in current_candidates:
             if isinstance(cand, type) and issubclass(cand, BaseModel):
-                found = _lookup_field(cand, part)
-                if found is not None:
+                step = _lookup_field_step(cand, loc, idx)
+                if step is not None:
                     break
-        if found is None:
+        if step is None:
             return None
-        chain.append(found)
-        current_candidates = _unwrap_types(found[1].annotation)
+        name, field, consumed = step
+        chain.append((name, field))
+        current_candidates = _unwrap_types(field.annotation)
+        idx += consumed
     return chain
 
 

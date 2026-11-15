@@ -181,3 +181,4 @@ When stderr isn't a terminal, that writes:
 
 - **Keep values hidden after `get_secret_value()`.** Once code calls `get_secret_value()`, it holds the plain value and must keep it out of logs, errors and files itself.
 - **Hide passwords inside plain text Settings on its own.** A password inside a `str` Setting such as `postgres://app:hunter2@db.internal/app` is hidden only when the [redaction library](../aa-toolkit-redact/README.md) is attached.
+- **Hide input values echoed inside custom validator exceptions.** A `@field_validator` or `@model_validator` keeps its raised exception message, so validator code must not include raw values in that text.
