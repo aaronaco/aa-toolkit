@@ -54,6 +54,23 @@
     ],
     "commands": [
       {
+        "name": "add",
+        "summary": "Add a piece to the project in the current folder.",
+        "effect": "write",
+        "arguments": [
+          {
+            "name": "PIECE",
+            "type": "string",
+            "required": true,
+            "help": "The piece to add (ci).",
+            "choices": [
+              "ci"
+            ]
+          }
+        ],
+        "options": []
+      },
+      {
         "name": "init",
         "summary": "Create a project in a new or empty folder.",
         "effect": "write",

@@ -75,6 +75,22 @@ def _option_by_flag(cmd: dict[str, Any], flag: str) -> dict[str, Any]:
     return by_flag[flag]
 
 
+def test_add_entry_describes_piece_argument_choices_and_write_effect(aa) -> None:
+    result = aa("commands", "--json")
+
+    assert result.exit_code == 0, result.output
+    add_cmd = _command_by_name(json.loads(result.stdout)["data"], "add")
+    assert add_cmd["summary"] == "Add a piece to the project in the current folder."
+    assert add_cmd["effect"] == "write"
+    assert [arg["name"] for arg in add_cmd["arguments"]] == ["PIECE"]
+    piece_arg = add_cmd["arguments"][0]
+    assert piece_arg["type"] == "string"
+    assert piece_arg["choices"] == ["ci"]
+    assert piece_arg["required"] is True
+    assert piece_arg["help"]
+    assert add_cmd["options"] == []
+
+
 def test_init_entry_describes_name_argument_options_and_write_effect(aa) -> None:
     result = aa("commands", "--json")
 
@@ -173,6 +189,7 @@ def test_commands_in_human_mode_prints_each_visible_command_with_its_summary(aa)
     assert result.exit_code == 0, result.output
     assert result.stderr == ""
     assert [line.split(None, 1) for line in result.stdout.splitlines()] == [
+        ["add", "Add a piece to the project in the current folder."],
         ["init", "Create a project in a new or empty folder."],
         ["redact", "Print a cleaned copy of a file or piped text."],
         ["commands", "List every command, its arguments, flags and exit codes."],

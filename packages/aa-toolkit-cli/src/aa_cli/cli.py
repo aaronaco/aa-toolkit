@@ -14,6 +14,7 @@ from typing import Annotated, Any
 import typer
 from typer.core import TyperGroup
 
+from aa_cli.add import AddError, Piece, add_piece
 from aa_cli.commands import Effect, describe_cli, format_commands
 from aa_cli.init import (
     NAME_RULE,
@@ -175,6 +176,35 @@ def root(
 
 
 @app.command()
+def add(
+    ctx: typer.Context,
+    piece: Annotated[
+        Piece,
+        typer.Argument(help=f"The piece to add ({', '.join(Piece)})."),
+    ],
+    json_output: JsonFlag = False,
+    verbose: VerboseFlag = False,
+) -> None:
+    """Add a piece to the project in the current folder."""
+    out: Output = ctx.obj
+    target = Path.cwd().resolve()
+    try:
+        added = add_piece(target, piece)
+    except AddError as exc:
+        out.failure(exc.code, str(exc), fix=exc.fix)
+        raise typer.Exit(ExitCode.PROBLEMS) from exc
+    except StepFailed as exc:
+        out.failure("step_failed", str(exc), fix=exc.fix)
+        raise typer.Exit(ExitCode.PROBLEMS) from exc
+    data = {"piece": str(piece), "files": added.files, "next_steps": added.next_steps}
+    if added.files:
+        lines = [f"Added {piece} to {target}", *(f"  {f}" for f in added.files)]
+    else:
+        lines = [f"{piece} is already there in {target}"]
+    out.success(data, human="\n".join(lines))
+
+
+@app.command()
 def init(
     ctx: typer.Context,
     name: Annotated[str, typer.Argument(help="The project name, also the folder it goes in.")],
@@ -301,6 +331,7 @@ def redact(
 
 
 COMMAND_EFFECTS: dict[str, Effect] = {
+    "add": Effect.WRITE,
     "init": Effect.WRITE,
     "redact": Effect.READ,
     "commands": Effect.READ,
