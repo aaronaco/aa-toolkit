@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from typing import TYPE_CHECKING, Any
 
 import keyring
@@ -101,13 +101,17 @@ def _combine(current: object, incoming: object) -> object:
             current[key] = _combine(current[key], value) if key in current else value
         return current
     if isinstance(current, list) and isinstance(incoming, list):
-        current.extend([None] * (len(incoming) - len(current)))
-        for index, value in enumerate(incoming):
-            if value is not None:
-                slot = current[index]
-                current[index] = value if slot is None else _combine(slot, value)
-        return current
+        return _combine_lists(current, incoming)
     return incoming
+
+
+def _combine_lists(current: list[object], incoming: list[object]) -> list[object]:
+    current.extend([None] * (len(incoming) - len(current)))
+    for index, value in enumerate(incoming):
+        if value is not None:
+            slot = current[index]
+            current[index] = value if slot is None else _combine(slot, value)
+    return current
 
 
 def _read_secret(app_name: str, field_name: str) -> tuple[str | None, SettingsProblem | None, bool]:
@@ -137,18 +141,21 @@ class SecretStoreSettingsSource(PydanticBaseSettingsSource):
             raise SettingsError(f"{problem['field']}: {problem['message']}", [problem])
         return (None if value is None else _nest(path, value)), str(path[0]), False
 
+    def _fields_to_read(self) -> Iterator[tuple[str, _Path]]:
+        """Each Secret field no higher source has set, with the path pydantic reads it from."""
+        for field_name, field in self.settings_cls.model_fields.items():
+            if not is_secret_annotation(field.annotation):
+                continue
+            paths = _accepted_paths(field, field_name, self.config)
+            if not any(_has_path(self.current_state, path) for path in paths):
+                yield field_name, paths[0]
+
     def __call__(self) -> dict[str, Any]:
         if not self.app_name:
             return {}
         data: dict[str, Any] = {}
         problems: list[SettingsProblem] = []
-        for field_name, field in self.settings_cls.model_fields.items():
-            if not is_secret_annotation(field.annotation):
-                continue
-            paths = _accepted_paths(field, field_name, self.config)
-            if any(_has_path(self.current_state, path) for path in paths):
-                # A source with higher priority already set this field.
-                continue
+        for field_name, path in self._fields_to_read():
             value, problem, store_missing = _read_secret(self.app_name, field_name)
             if store_missing:
                 return {}
@@ -156,7 +163,7 @@ class SecretStoreSettingsSource(PydanticBaseSettingsSource):
                 problems.append(problem)
                 continue
             if value is not None:
-                root, nested = str(paths[0][0]), _nest(paths[0], value)
+                root, nested = str(path[0]), _nest(path, value)
                 data[root] = _combine(data[root], nested) if root in data else nested
         if problems:
             lines = [f"{p['field']}: {p['message']}" for p in problems]
