@@ -13,7 +13,9 @@ EXAMPLES = re.compile(
 )
 
 
-def test_every_example_in_the_readme_prints_what_the_readme_says(package_dir, monkeypatch, tmp_path):
+def test_every_example_in_the_readme_prints_what_the_readme_says(
+    package_dir, monkeypatch, tmp_path
+):
     monkeypatch.chdir(tmp_path)
     readme = (package_dir / "README.md").read_text(encoding="utf-8")
     examples = EXAMPLES.findall(readme)

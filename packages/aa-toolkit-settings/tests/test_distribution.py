@@ -21,7 +21,7 @@ def test_aa_settings_imports_from_the_package_folder(package_dir):
     assert Path(aa_settings.__file__).resolve().parent == package_dir / "src" / "aa_settings"
 
 
-def test_the_public_interface_exposes_the_expected_names():
+def test_the_public_names_are_the_settings_types_and_helpers():
     assert sorted(aa_settings.__all__) == [
         "BaseSettings",
         "Secret",

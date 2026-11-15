@@ -72,4 +72,3 @@ def test_secret_values_returns_text_for_populated_secrets_and_skips_empty_and_no
     settings = Settings()
 
     assert secret_values(settings) == ["sk-123", "9876", "0"]
-

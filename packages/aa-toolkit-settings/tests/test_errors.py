@@ -121,4 +121,3 @@ def test_invalid_complex_env_value_raises_settings_error_with_no_cause_or_contex
     assert err.__context__ is None
     assert "secret-bad-json" not in str(err)
     assert "secret-bad-json" not in repr(err.problems)
-

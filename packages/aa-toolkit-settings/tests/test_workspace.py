@@ -36,8 +36,7 @@ def test_import_sorting_knows_the_settings_library_is_first_party(pyproject):
 
 def test_coverage_includes_the_settings_library(ci):
     assert (
-        "pytest --cov=aa_cli --cov=aa_log --cov=aa_redact --cov=aa_settings --cov-report=xml"
-        in ci
+        "pytest --cov=aa_cli --cov=aa_log --cov=aa_redact --cov=aa_settings --cov-report=xml" in ci
     )
 
 

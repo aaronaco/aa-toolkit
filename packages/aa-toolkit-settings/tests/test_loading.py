@@ -156,4 +156,3 @@ def test_dotenv_beats_secrets_dir_which_beats_default(monkeypatch, tmp_path):
     assert settings.from_dotenv == "dotenv"
     assert settings.from_secrets_dir == "secrets-dir"
     assert settings.from_default == "default"
-

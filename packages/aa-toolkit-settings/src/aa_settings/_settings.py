@@ -1,4 +1,4 @@
-"""Settings base class and configuration dictionary."""
+"""Settings base class and SettingsConfigDict."""
 
 from typing import Any, ClassVar
 
@@ -15,7 +15,7 @@ from aa_settings._errors import (
 
 
 class SettingsConfigDict(PydanticSettingsConfigDict, total=False):
-    """Configuration dictionary for `BaseSettings` subclasses."""
+    """Settings options for `BaseSettings` subclasses."""
 
 
 class BaseSettings(PydanticBaseSettings):
@@ -28,7 +28,10 @@ class BaseSettings(PydanticBaseSettings):
         hide_input_in_errors=True,
     )
 
-    def __init__(self, **values: Any) -> None:
+    def __init__(
+        self,
+        **values: Any,  # noqa: ANN401  # mirrors pydantic_settings.BaseSettings.__init__
+    ) -> None:
         error: SettingsError | None = None
         try:
             super().__init__(**values)
