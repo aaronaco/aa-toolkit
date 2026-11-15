@@ -47,6 +47,21 @@ def _alias_names(alias: object) -> set[str]:
     return set()
 
 
+def _own_fields(annotation: object) -> list[tuple[set[str], object]]:
+    """The names and type of each field when `annotation` is a model or dataclass."""
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return [
+            (
+                {name} | _alias_names(field.alias) | _alias_names(field.validation_alias),
+                field.annotation,
+            )
+            for name, field in annotation.model_fields.items()
+        ]
+    if isinstance(annotation, type) and is_dataclass(annotation):
+        return [({field.name}, field.type) for field in dataclass_fields(annotation)]
+    return []
+
+
 def _declared_names(settings_cls: type[BaseModel]) -> set[str]:
     """Every name written in the Settings types: fields, aliases and Literal values.
 
@@ -61,15 +76,10 @@ def _declared_names(settings_cls: type[BaseModel]) -> set[str]:
         if id(annotation) in seen:
             continue
         seen.add(id(annotation))
-        if isinstance(annotation, type) and issubclass(annotation, BaseModel):
-            for name, field in annotation.model_fields.items():
-                names |= {name} | _alias_names(field.alias) | _alias_names(field.validation_alias)
-                pending.append(field.annotation)
-        elif isinstance(annotation, type) and is_dataclass(annotation):
-            for field in dataclass_fields(annotation):
-                names.add(field.name)
-                pending.append(field.type)
-        elif get_origin(annotation) is Literal:
+        for field_names, field_type in _own_fields(annotation):
+            names |= field_names
+            pending.append(field_type)
+        if get_origin(annotation) is Literal:
             names |= {arg for arg in get_args(annotation) if isinstance(arg, str)}
         pending.extend(get_args(annotation))
     return names
