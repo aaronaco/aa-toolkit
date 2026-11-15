@@ -495,3 +495,104 @@ def test_real_windows_credential_manager_round_trip(monkeypatch, tmp_path):
     assert delete_secret(app_name, "emoji_key") is False
     assert keyring.get_password(app_name, "api_key") is None
     assert keyring.get_password(app_name, "emoji_key") is None
+
+
+def test_env_value_under_another_accepted_name_wins_over_secret_store(
+    memory_keyring, monkeypatch, tmp_path
+):
+    from pydantic import AliasChoices, Field
+
+    monkeypatch.chdir(tmp_path)
+    memory_keyring.set_password("my-app", "api_key", "store")
+    memory_keyring.set_password("my-app", "choice_key", "store")
+    monkeypatch.setenv("API_KEY", "env")
+    monkeypatch.setenv("SECOND", "env")
+
+    class Settings(BaseSettings):
+        model_config = SettingsConfigDict(app_name="my-app", validate_by_name=True)
+
+        api_key: Secret[str] = Field(validation_alias="CUSTOM_KEY")
+        choice_key: Secret[str] = Field(validation_alias=AliasChoices("FIRST", "SECOND"))
+
+    settings = Settings()
+
+    assert settings.api_key.get_secret_value() == "env"
+    assert settings.choice_key.get_secret_value() == "env"
+
+
+def test_secret_store_is_not_read_for_a_field_set_by_a_higher_source(
+    memory_keyring, monkeypatch, tmp_path
+):
+    from keyring.errors import KeyringError
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("API_KEY", "env")
+
+    def broken_get(service: str, username: str) -> str | None:
+        raise KeyringError("store is broken")
+
+    memory_keyring.get_password = broken_get
+
+    class Settings(BaseSettings):
+        model_config = SettingsConfigDict(app_name="my-app")
+
+        api_key: Secret[str]
+
+    assert Settings().api_key.get_secret_value() == "env"
+
+
+def test_reads_secret_for_alias_path_with_list_index(memory_keyring, monkeypatch, tmp_path):
+    from pydantic import AliasPath, Field
+
+    monkeypatch.chdir(tmp_path)
+    memory_keyring.set_password("my-app", "first_key", "store-first")
+    memory_keyring.set_password("my-app", "third_key", "store-third")
+
+    class Settings(BaseSettings):
+        model_config = SettingsConfigDict(app_name="my-app")
+
+        first_key: Secret[str] = Field(validation_alias=AliasPath("keys", 0))
+        third_key: Secret[str] = Field(validation_alias=AliasPath("others", 2))
+
+    settings = Settings()
+
+    assert settings.first_key.get_secret_value() == "store-first"
+    assert settings.third_key.get_secret_value() == "store-third"
+
+
+def test_save_and_delete_secret_raise_secret_store_error_when_backend_discovery_fails(
+    monkeypatch,
+):
+    from aa_settings import SecretStoreError, delete_secret, save_secret
+
+    def broken_discovery():
+        raise ModuleNotFoundError("no module named secret-backend")
+
+    monkeypatch.setattr(keyring, "get_keyring", broken_discovery)
+
+    for call in (
+        lambda: save_secret("my-app", "api_key", "secret-val"),
+        lambda: delete_secret("my-app", "api_key"),
+    ):
+        with pytest.raises(SecretStoreError) as exc_info:
+            call()
+        assert exc_info.value.no_store is False
+        assert exc_info.value.__context__ is None
+        assert "ModuleNotFoundError" in str(exc_info.value)
+
+
+def test_delete_secret_raises_when_backend_refuses_but_entry_remains(memory_keyring):
+    from aa_settings import SecretStoreError, delete_secret
+
+    memory_keyring.set_password("my-app", "api_key", "still-here")
+
+    def refusing_delete(service: str, username: str) -> None:
+        raise PasswordDeleteError("access denied")
+
+    memory_keyring.delete_password = refusing_delete
+
+    with pytest.raises(SecretStoreError) as exc_info:
+        delete_secret("my-app", "api_key")
+    assert exc_info.value.no_store is False
+    assert exc_info.value.__context__ is None
+    assert "still-here" not in str(exc_info.value)

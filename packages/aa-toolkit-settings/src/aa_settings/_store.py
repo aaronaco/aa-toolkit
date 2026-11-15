@@ -29,40 +29,74 @@ class SecretStoreError(Exception):
         self.no_store = no_store
 
 
-def _alias_path(alias: object) -> tuple[str, ...] | None:
+type _Path = tuple[str | int, ...]
+
+
+def _alias_path(alias: object) -> _Path | None:
     if isinstance(alias, str):
         return (alias,)
-    if isinstance(alias, AliasPath) and all(isinstance(part, str) for part in alias.path):
-        return tuple(str(part) for part in alias.path)
+    if isinstance(alias, AliasPath) and alias.path and isinstance(alias.path[0], str):
+        return tuple(alias.path)
     return None
 
 
-def _validation_path(
-    field: FieldInfo, field_name: str, config: Mapping[str, Any]
-) -> tuple[str, ...]:
-    """The key path pydantic expects when populating `field`."""
-    if not config.get("validate_by_alias", True):
-        return (field_name,)
+def _validate_by_name(config: Mapping[str, Any]) -> bool:
+    """Resolve `validate_by_name` the way pydantic does, including `populate_by_name`."""
+    for key in ("validate_by_name", "populate_by_name"):
+        value = config.get(key)
+        if value is not None:
+            return bool(value)
+    return config.get("validate_by_alias") is False
+
+
+def _accepted_paths(field: FieldInfo, field_name: str, config: Mapping[str, Any]) -> list[_Path]:
+    """Every key path pydantic accepts for `field`, in the order it tries them."""
+    paths: list[_Path] = []
     alias = field.validation_alias
-    if isinstance(alias, AliasChoices):
-        for choice in alias.choices:
-            resolved = _alias_path(choice)
-            if resolved is not None:
-                return resolved
-        return (field_name,)
-    resolved = _alias_path(alias)
-    return resolved if resolved is not None else (field_name,)
+    if alias is not None and config.get("validate_by_alias") is not False:
+        choices = alias.choices if isinstance(alias, AliasChoices) else [alias]
+        paths = [path for path in map(_alias_path, choices) if path is not None]
+    if not paths or _validate_by_name(config):
+        paths.append((field_name,))
+    return paths
 
 
-def _assign_path(data: dict[str, Any], path: tuple[str, ...], value: str) -> None:
-    cursor = data
-    for part in path[:-1]:
-        nested = cursor.get(part)
-        if not isinstance(nested, dict):
-            nested = {}
-            cursor[part] = nested
-        cursor = nested
-    cursor[path[-1]] = value
+def _validation_path(field: FieldInfo, field_name: str, config: Mapping[str, Any]) -> _Path:
+    """The key path pydantic expects when populating `field`."""
+    return _accepted_paths(field, field_name, config)[0]
+
+
+def _has_path(data: object, path: _Path) -> bool:
+    for part in path:
+        if isinstance(part, str) and isinstance(data, dict) and part in data:
+            data = data[part]
+        elif isinstance(part, int) and isinstance(data, list) and -len(data) <= part < len(data):
+            data = data[part]
+        else:
+            return False
+    return True
+
+
+def _nest(path: _Path, value: str) -> object:
+    """Wrap `value` so it sits at `path` below its first key."""
+    nested: object = value
+    for part in reversed(path[1:]):
+        if isinstance(part, int):
+            items: list[object] = [None] * (part + 1 if part >= 0 else -part)
+            items[part] = nested
+            nested = items
+        else:
+            nested = {part: nested}
+    return nested
+
+
+def _merge(data: dict[str, Any], key: str, value: object) -> None:
+    current = data.get(key)
+    if isinstance(current, dict) and isinstance(value, dict):
+        for sub_key, sub_value in value.items():
+            _merge(current, sub_key, sub_value)
+    else:
+        data[key] = value
 
 
 def _read_secret(app_name: str, field_name: str) -> tuple[str | None, SettingsProblem | None, bool]:
@@ -86,16 +120,11 @@ class SecretStoreSettingsSource(PydanticBaseSettingsSource):
     def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any, str, bool]:
         path = _validation_path(field, field_name, self.config)
         if not self.app_name or not is_secret_annotation(field.annotation):
-            return None, path[0], False
+            return None, str(path[0]), False
         value, problem, _ = _read_secret(self.app_name, field_name)
         if problem is not None:
             raise SettingsError(f"{problem['field']}: {problem['message']}", [problem])
-        if value is None or len(path) == 1:
-            return value, path[0], False
-        nested: Any = value
-        for part in reversed(path[1:]):
-            nested = {part: nested}
-        return nested, path[0], False
+        return (None if value is None else _nest(path, value)), str(path[0]), False
 
     def __call__(self) -> dict[str, Any]:
         if not self.app_name:
@@ -105,6 +134,10 @@ class SecretStoreSettingsSource(PydanticBaseSettingsSource):
         for field_name, field in self.settings_cls.model_fields.items():
             if not is_secret_annotation(field.annotation):
                 continue
+            paths = _accepted_paths(field, field_name, self.config)
+            if any(_has_path(self.current_state, path) for path in paths):
+                # A source with higher priority already set this field.
+                continue
             value, problem, store_missing = _read_secret(self.app_name, field_name)
             if store_missing:
                 return {}
@@ -112,7 +145,7 @@ class SecretStoreSettingsSource(PydanticBaseSettingsSource):
                 problems.append(problem)
                 continue
             if value is not None:
-                _assign_path(data, _validation_path(field, field_name, self.config), value)
+                _merge(data, str(paths[0][0]), _nest(paths[0], value))
         if problems:
             lines = [f"{p['field']}: {p['message']}" for p in problems]
             raise SettingsError("\n".join(lines), problems)
@@ -120,7 +153,15 @@ class SecretStoreSettingsSource(PydanticBaseSettingsSource):
 
 
 def _require_store() -> None:
-    if isinstance(keyring.get_keyring(), null_keyring.Keyring):
+    error: SecretStoreError | None = None
+    backend: object = None
+    try:
+        backend = keyring.get_keyring()
+    except Exception as exc:
+        error = _store_error(exc)
+    if error is not None:
+        raise error
+    if isinstance(backend, null_keyring.Keyring):
         raise SecretStoreError("No Secret store is available on this machine", no_store=True)
 
 
@@ -168,12 +209,21 @@ def delete_secret(app_name: str, name: str) -> bool:
 
     _require_store()
     error: SecretStoreError | None = None
+    existed = True
     try:
         keyring.delete_password(app_name, name)
     except PasswordDeleteError:
-        return False
+        existed = False
     except Exception as exc:
         error = _store_error(exc)
+    if not existed:
+        # Some backends raise PasswordDeleteError for failures other than a missing
+        # entry, so only report "not there" once a read confirms it.
+        try:
+            if keyring.get_password(app_name, name) is not None:
+                error = SecretStoreError("Secret store failed (PasswordDeleteError)")
+        except Exception as exc:
+            error = _store_error(exc)
     if error is not None:
         raise error
-    return True
+    return existed
