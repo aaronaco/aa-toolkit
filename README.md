@@ -68,6 +68,17 @@ aa redact app.log > clean.log
 docker logs -f web | aa redact --with ip_address,phone --without card
 ```
 
+`aa redact --check [FILE]` reports every Finding without changing the file or printing the cleaned copy. Each Finding prints as `<source>:<line>:<column>: <KIND>` (`<stdin>` for piped text), with 1-based character positions and never any part of the value. `--with` and `--without` narrow what counts, and a value under a Sensitive name reports as `REDACTED`. Clean input prints nothing and exits `0`; any Finding makes it exit `1` (plain `aa redact` exits `0` either way). With `--json` (or `AA_JSON=1`), it prints `{"ok": true, "data": {"findings": [...]}}` with each Finding's `line`, `column`, `end_line`, `end_column`, and `kind`, still exiting `1` when the list is not empty.
+
+```bash
+aa redact --check app.log
+```
+
+```text
+app.log:3:6: EMAIL
+app.log:3:23: GITHUB_TOKEN
+```
+
 ## Develop
 
 ```bash
