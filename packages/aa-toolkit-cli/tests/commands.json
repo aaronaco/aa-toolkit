@@ -138,7 +138,7 @@
             "choices": null,
             "required": false,
             "repeatable": false,
-            "help": "Show what would be created and run, without creating or running anything."
+            "help": "Show what would be created and run, without writing files or running setup commands (reads git config for MIT)."
           }
         ]
       },

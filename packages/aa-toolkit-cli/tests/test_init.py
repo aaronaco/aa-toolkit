@@ -819,7 +819,7 @@ def test_dry_run_creates_nothing_runs_no_commands_and_reports_plan(aa_in, machin
     result = aa_in(tmp_path, "init", "my-app", "--dry-run", "--json", env=machine.env)
 
     assert result.exit_code == 0, result.output
-    assert not (tmp_path / "my-app").exists()
+    assert list(tmp_path.iterdir()) == []
     assert machine.gh_calls() == []
     envelope = json.loads(result.stdout)
     assert envelope["ok"] is True
@@ -939,6 +939,7 @@ def test_dry_run_fails_like_a_real_run_when_target_is_not_empty(aa_in, machine, 
     assert dry.exit_code == real.exit_code
     assert json.loads(dry.stdout) == json.loads(real.stdout)
     assert [path.name for path in target.iterdir()] == ["notes.txt"]
+    assert (target / "notes.txt").read_text() == "keep me"
 
 
 def test_dry_run_fails_like_a_real_run_when_outer_workspace_would_take_target_in(
@@ -1031,3 +1032,29 @@ def test_dry_run_in_human_mode_prints_files_and_commands_without_creating_anythi
         "uv add --python 3.15 --dev ruff pytest",
         "git -c core.excludesFile= add --all",
     ]
+
+
+def test_dry_run_in_human_mode_with_github_quotes_commit_message(aa_in, machine, tmp_path):
+    machine.add_real("git")
+    machine.set_identity(name="Ada Lovelace", email="ada@example.com")
+
+    result = aa_in(tmp_path, "init", "my-app", "--github", "--dry-run", env=machine.env)
+
+    assert result.exit_code == 0, result.output
+    lines = [line.strip() for line in result.stdout.splitlines()]
+    assert "git commit --quiet --message 'chore: initial commit'" in lines
+    assert "gh repo create my-app --private --source . --push" in lines
+
+
+def test_dry_run_files_match_real_run_for_consecutive_separators(aa_in, machine, tmp_path):
+    env = local_machine(machine).env
+
+    dry = aa_in(tmp_path, "init", "my--app", "--dry-run", "--json", env=env)
+    real = aa_in(tmp_path, "init", "my--app", "--json", env=env)
+
+    assert dry.exit_code == 0, dry.output
+    assert real.exit_code == 0, real.output
+    dry_files = json.loads(dry.stdout)["data"]["files"]
+    real_files = json.loads(real.stdout)["data"]["files"]
+    assert "src/my_app/__init__.py" in real_files
+    assert dry_files == real_files

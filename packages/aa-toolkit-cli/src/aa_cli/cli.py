@@ -5,6 +5,7 @@ import io
 import logging
 import os
 import re
+import shlex
 import sys
 from collections.abc import Generator, Sequence
 from importlib.metadata import version
@@ -224,7 +225,10 @@ def init(
         bool,
         typer.Option(
             "--dry-run",
-            help="Show what would be created and run, without creating or running anything.",
+            help=(
+                "Show what would be created and run, without writing files or running setup"
+                " commands (reads git config for MIT)."
+            ),
         ),
     ] = False,
     json_output: JsonFlag = False,
@@ -266,7 +270,7 @@ def init(
             f"Would create a {kind} project at {target}",
             *(f"  {f}" for f in plan.files),
             "Would run:",
-            *(f"  {' '.join(s['command'])}" for s in steps),
+            *(f"  {shlex.join(s['command'])}" for s in steps),
         ]
         out.success(data, human="\n".join(lines))
         return

@@ -97,8 +97,8 @@ class OuterWorkspace:
 
 
 def _import_name(name: str) -> str:
-    # uv lowercases the name and turns '-' into '_' to get the import name.
-    return name.lower().replace("-", "_")
+    # uv lowercases the name and collapses runs of '-' and '_' into one '_' to get the import name.
+    return re.sub(r"[-_]+", "_", name).lower()
 
 
 def is_valid_name(name: str) -> bool:
