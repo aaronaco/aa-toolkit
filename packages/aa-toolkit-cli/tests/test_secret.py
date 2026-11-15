@@ -3,7 +3,6 @@
 import json
 from pathlib import Path
 
-import click
 import keyring
 import pytest
 import typer
@@ -124,7 +123,7 @@ def test_set_with_app_wins_over_the_pyproject_name(aa, store, project):
 
 @pytest.mark.parametrize(
     "pyproject",
-    [None, '[tool.ruff]\nline-length = 100\n', "not = [toml", '[project]\nname = ""\n'],
+    [None, "[tool.ruff]\nline-length = 100\n", "not = [toml", '[project]\nname = ""\n'],
     ids=["missing", "no-project-name", "broken", "empty-name"],
 )
 @pytest.mark.parametrize("command", ["set", "delete"])
@@ -150,9 +149,7 @@ def test_no_app_name_in_human_mode_names_app_on_stderr(aa, store):
 
 @pytest.mark.parametrize("name", ["api-key", "1key", "class", "api key"])
 @pytest.mark.parametrize("command", ["set", "delete"])
-def test_a_name_that_is_not_a_python_identifier_is_a_usage_error(
-    aa, store, project, name, command
-):
+def test_a_name_that_is_not_a_python_identifier_is_a_usage_error(aa, store, project, name, command):
     store.entries[("my-app", name)] = "kept"
 
     result = aa("--json", "secret", command, name, stdin=VALUE)
@@ -163,7 +160,7 @@ def test_a_name_that_is_not_a_python_identifier_is_a_usage_error(
 
 
 @pytest.mark.parametrize(
-    "how", [{"typed": ""}, {"stdin": b""}, {"stdin": b"\n"}], ids=["typed", "piped", "newline"]
+    "how", [{"typed": "\n"}, {"stdin": b""}, {"stdin": b"\n"}], ids=["enter", "piped", "newline"]
 )
 def test_an_empty_value_is_a_usage_error_and_nothing_is_saved(aa, store, project, how):
     store.entries[("my-app", "api_key")] = "kept"
@@ -175,9 +172,7 @@ def test_an_empty_value_is_a_usage_error_and_nothing_is_saved(aa, store, project
     assert store.entries == {("my-app", "api_key"): "kept"}
 
 
-def test_a_value_over_the_limit_is_secret_too_large_with_its_size_and_the_limit(
-    aa, store, project
-):
+def test_a_value_over_the_limit_is_secret_too_large_with_its_size_and_the_limit(aa, store, project):
     big = "x" * 1281  # 2562 bytes in UTF-16
 
     result = aa("--json", "secret", "set", "api_key", stdin=big)
@@ -254,7 +249,7 @@ def test_set_in_json_mode_with_a_terminal_is_a_usage_error_without_prompting(
 
 def test_ctrl_c_at_the_prompt_is_aborted(aa, store, project, monkeypatch):
     def press_ctrl_c(*args, **kwargs):
-        raise click.exceptions.Abort()  # what click raises on Ctrl+C at a prompt
+        raise typer.Abort()  # what typer.prompt raises on Ctrl+C
 
     monkeypatch.setattr(typer, "prompt", press_ctrl_c)
 
@@ -310,9 +305,7 @@ def test_delete_of_a_secret_that_is_not_saved_is_secret_not_found(aa, store, pro
     assert store.entries == {("my-app", "other"): "kept"}
 
 
-@pytest.mark.parametrize(
-    "args", [["set", "api_key"], ["delete", "api_key"]], ids=["set", "delete"]
-)
+@pytest.mark.parametrize("args", [["set", "api_key"], ["delete", "api_key"]], ids=["set", "delete"])
 def test_no_secret_store_is_no_secret_store(aa, project, args):
     previous = keyring.get_keyring()
     keyring.set_keyring(fail.Keyring())

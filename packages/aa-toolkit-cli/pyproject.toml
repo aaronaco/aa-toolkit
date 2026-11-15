@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
     "aa-toolkit-redact",
+    "aa-toolkit-settings",
     "typer>=0.27.3",
 ]
 
@@ -18,6 +19,7 @@ build-backend = "uv_build"
 
 [tool.uv.sources]
 aa-toolkit-redact = { workspace = true }
+aa-toolkit-settings = { workspace = true }
 
 [tool.uv.build-backend]
 module-name = "aa_cli"
