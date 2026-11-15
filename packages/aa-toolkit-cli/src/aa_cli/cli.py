@@ -48,7 +48,7 @@ from aa_cli.redact import (
     find_all,
     redact_file,
 )
-from aa_cli.secret import NotUtf8, is_field_name, project_name, read_piped_value
+from aa_cli.secret import NotUtf8, field_name, project_name, read_piped_value
 from aa_settings import SecretStoreError, delete_secret, save_secret
 
 log = logging.getLogger("aa")
@@ -395,18 +395,18 @@ AppOption = Annotated[
 ]
 
 
-def _secret_target(ctx: typer.Context, name: str, app_name: str | None) -> str:
-    """Check ``NAME`` and return the app name, or raise a usage error."""
-    if not is_field_name(name):
+def _secret_target(ctx: typer.Context, name: str, app_name: str | None) -> tuple[str, str]:
+    """Return the app name and the field name, or raise a usage error."""
+    field = field_name(name)
+    if field is None:
+        # NAME isn't echoed: it may be a value given by mistake.
         raise typer.BadParameter(
-            f"'{name}' isn't a valid Python name, so no Settings field can read it",
-            ctx=ctx,
-            param_hint="'NAME'",
+            "not a name a Settings field can have, such as api_key", ctx=ctx, param_hint="'NAME'"
         )
     if app_name is not None:
         if not app_name:
             raise typer.BadParameter("must not be empty", ctx=ctx, param_hint="'--app'")
-        return app_name
+        return app_name, field
     found = project_name(Path.cwd())
     if found is None:
         raise typer.BadParameter(
@@ -414,7 +414,10 @@ def _secret_target(ctx: typer.Context, name: str, app_name: str | None) -> str:
             ctx=ctx,
             param_hint="'--app'",
         )
-    return found
+    return found, field
+
+
+_STDIN_HINT = "'standard input'"
 
 
 def _secret_value(ctx: typer.Context, out: Output, name: str) -> str:
@@ -424,7 +427,7 @@ def _secret_value(ctx: typer.Context, out: Output, name: str) -> str:
             raise typer.BadParameter(
                 "with --json, pipe the value in, e.g. 'cmd | aa secret set NAME --json'",
                 ctx=ctx,
-                param_hint="'standard input'",
+                param_hint=_STDIN_HINT,
             )
         try:
             value: str = typer.prompt(
@@ -436,10 +439,10 @@ def _secret_value(ctx: typer.Context, out: Output, name: str) -> str:
         try:
             value = read_piped_value()
         except NotUtf8 as exc:
-            raise typer.BadParameter(str(exc), ctx=ctx, param_hint="'standard input'") from None
+            raise typer.BadParameter(str(exc), ctx=ctx, param_hint=_STDIN_HINT) from None
     if not value:
         raise typer.BadParameter(
-            "the value is empty, so nothing was saved", ctx=ctx, param_hint="'standard input'"
+            "the value is empty, so nothing was saved", ctx=ctx, param_hint=_STDIN_HINT
         )
     return value
 
@@ -466,7 +469,7 @@ def secret_set(
     one trailing line ending. It's never an argument and never printed.
     """
     out: Output = ctx.obj
-    target = _secret_target(ctx, name, app_name)
+    target, name = _secret_target(ctx, name, app_name)
     value = _secret_value(ctx, out, name)
     try:
         replaced = save_secret(target, name, value)
@@ -493,7 +496,7 @@ def secret_delete(
 ) -> None:
     """Delete a Secret from the Secret store."""
     out: Output = ctx.obj
-    target = _secret_target(ctx, name, app_name)
+    target, name = _secret_target(ctx, name, app_name)
     try:
         existed = delete_secret(target, name)
     except SecretStoreError as exc:

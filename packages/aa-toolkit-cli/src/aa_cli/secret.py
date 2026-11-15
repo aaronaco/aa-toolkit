@@ -3,12 +3,32 @@
 import keyword
 import sys
 import tomllib
+import unicodedata
+import warnings
 from pathlib import Path
 
+from aa_settings import BaseSettings
 
-def is_field_name(name: str) -> bool:
-    """Whether ``name`` can be a field in a Settings class."""
-    return name.isidentifier() and not keyword.iskeyword(name)
+
+def field_name(name: str) -> str | None:
+    """``name`` as a Settings class field would spell it, or None when no field can have it.
+
+    Python reads identifiers in NFKC form, and pydantic refuses or hides some names,
+    such as ``_private`` or ``model_config``, so pydantic itself is asked.
+    """
+    name = unicodedata.normalize("NFKC", name)
+    if not name.isidentifier() or keyword.iskeyword(name):
+        return None
+    namespace = {"__annotations__": {name: str}, "__module__": __name__}
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter(
+                "ignore"
+            )  # a name that shadows an inherited attribute still works
+            probe = type("Probe", (BaseSettings,), namespace)
+    except Exception:
+        return None
+    return name if name in probe.model_fields else None
 
 
 def project_name(folder: Path) -> str | None:

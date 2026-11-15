@@ -86,14 +86,14 @@ app.log:3:6: EMAIL
 app.log:3:23: GITHUB_TOKEN
 ```
 
-`aa secret set NAME` saves a Secret in the Secret store (Credential Manager on Windows), so no file in your project has to hold it. `NAME` is the field name in your app's Settings class, such as `api_key`, and must be a valid Python name. The Secret is saved for the app named by `--app`, or else by `[project].name` in `pyproject.toml` in the current folder. Your Settings class's `app_name` must match that name, or the [Settings library](packages/aa-toolkit-settings/README.md) won't find the Secret. At a terminal, `aa secret set` asks for the value at a hidden prompt. Piped text is read to the end, without one trailing line ending, so `echo value | aa secret set api_key` saves `value`. The value is never an argument, so it stays out of your shell history, and no output or error ever prints it. An empty value is refused, and so is one over Credential Manager's limit of 2560 bytes. Saving over an existing Secret replaces it and says `Replaced`. With `--json` (or `AA_JSON=1`), pipe the value in: a terminal is a usage error, because JSON mode never waits for input. `data` holds `app`, `name` and `replaced`.
+`aa secret set NAME` saves a Secret in the Secret store (Credential Manager on Windows), so no file in your project has to hold it. `NAME` is the field name in your app's Settings class, such as `api_key`, and must be a valid Python name. The Secret is saved for the app named by `--app`, or else by `[project].name` in `pyproject.toml` in the current folder. Your Settings class's `app_name` must match that name, or the [Settings library](packages/aa-toolkit-settings/README.md) won't find the Secret. At a terminal, `aa secret set` asks for the value at a hidden prompt. Piped text is read to the end, without one trailing line ending, so a file that ends with a line break saves without it. The value is never an argument of `aa`, and no output or error ever prints it. The command you pipe from is another matter: `echo sk-live-abc123 | aa secret set api_key` puts the value in your shell history, so pipe from a file or a password manager instead, or use the prompt. An empty value is refused, and so is one over Credential Manager's limit of 2560 bytes. Saving over an existing Secret replaces it and says `Replaced`. With `--json` (or `AA_JSON=1`), pipe the value in: a terminal is a usage error, because JSON mode never waits for input. `data` holds `app`, `name` and `replaced`.
 
 ```bash
 aa secret set api_key
 ```
 
 ```bash
-echo sk-live-abc123 | aa secret set api_key --app my-app --json
+cat api_key.txt | aa secret set api_key --app my-app --json
 ```
 
 ```text

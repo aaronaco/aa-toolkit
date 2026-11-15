@@ -366,3 +366,62 @@ def test_the_value_is_never_an_argument(aa, store, project):
 
     assert result.exit_code == 2
     assert store.entries == {}
+
+
+def test_a_bad_name_is_not_echoed_in_the_usage_error(aa, store, project):
+    result = aa("--json", "secret", "set", VALUE, stdin="x")
+
+    assert result.exit_code == 2, result.output
+    assert json.loads(result.stdout)["error"]["code"] == "usage"
+    assert_value_hidden(result)
+
+
+@pytest.mark.parametrize(
+    "name", ["_api_key", "__api_key", "model_config", "model_dump", "settings_customise_sources"]
+)
+@pytest.mark.parametrize("command", ["set", "delete"])
+def test_a_name_no_settings_field_can_have_is_a_usage_error(aa, store, project, name, command):
+    store.entries[("my-app", name)] = "kept"
+
+    result = aa("--json", "secret", command, name, stdin=VALUE)
+
+    assert result.exit_code == 2, result.output
+    assert json.loads(result.stdout)["error"]["code"] == "usage"
+    assert store.entries == {("my-app", name): "kept"}
+
+
+def test_a_name_is_saved_in_the_spelling_python_gives_the_field(aa, store, project):
+    decomposed = "café_key"  # Python reads this field name as "café_key" (NFKC)
+
+    result = aa("--json", "secret", "set", decomposed, stdin=VALUE)
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["data"]["name"] == "café_key"
+    namespace: dict[str, object] = {}
+    source = (
+        "from aa_settings import BaseSettings, Secret, SettingsConfigDict\n"
+        "class Settings(BaseSettings):\n"
+        "    model_config = SettingsConfigDict(app_name='my-app', env_file=None)\n"
+        f"    {decomposed}: Secret[str]\n"
+    )
+    exec(source, namespace)  # noqa: S102  # the class must be parsed for Python to normalize it
+    settings = namespace["Settings"]()  # ty: ignore[call-non-callable]
+    assert settings.café_key.get_secret_value() == VALUE
+
+
+def test_delete_finds_a_secret_by_the_spelling_python_gives_the_field(aa, store, project):
+    store.entries[("my-app", "café_key")] = VALUE
+
+    result = aa("secret", "delete", "café_key")
+
+    assert result.exit_code == 0, result.output
+    assert store.entries == {}
+
+
+def test_a_name_that_shadows_an_inherited_attribute_but_still_is_a_field_is_saved(
+    aa, store, project
+):
+    result = aa("secret", "set", "json", stdin=VALUE)
+
+    assert result.exit_code == 0, result.output
+    assert store.entries == {("my-app", "json"): VALUE}

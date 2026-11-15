@@ -164,7 +164,7 @@ def _describe_command(
         for param in cmd.params
         if isinstance(param, TyperOption) and not param.hidden and param.opts[0] not in global_flags
     ]
-    summary = (cmd.help or "").splitlines()[0] if cmd.help else ""
+    summary = cmd.help.splitlines()[0] if cmd.help else ""
     return {
         "name": name,
         "summary": summary,
