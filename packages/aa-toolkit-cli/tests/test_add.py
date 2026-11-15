@@ -154,6 +154,30 @@ def test_add_ci_keeps_existing_dependency_version_requirements_unchanged(aa_in, 
     assert json.loads(res_both.stdout)["data"]["files"] == [".github/workflows/ci.yml", "uv.lock"]
 
 
+def test_add_ci_adds_tools_to_dev_when_only_in_optional_or_non_default_group(
+    aa_in, machine, tmp_path
+):
+    machine = uv_machine(machine)
+    project = make_uv_project(tmp_path, machine)
+    pyproject = project / "pyproject.toml"
+    pyproject.write_text(
+        pyproject.read_text(encoding="utf-8")
+        + '\n[project.optional-dependencies]\nlint = ["ruff>=0.16,<0.18"]\n'
+        + '\n[dependency-groups]\ntest = ["pytest>=8.0,<10"]\n',
+        encoding="utf-8",
+    )
+
+    result = aa_in(project, "add", "ci", "--json", env=machine.env)
+
+    assert result.exit_code == 0, result.output
+    parsed = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    dev_deps = parsed["dependency-groups"]["dev"]
+    assert any(dep.startswith("ruff") for dep in dev_deps)
+    assert any(dep.startswith("pytest") for dep in dev_deps)
+    assert parsed["project"]["optional-dependencies"]["lint"] == ["ruff>=0.16,<0.18"]
+    assert parsed["dependency-groups"]["test"] == ["pytest>=8.0,<10"]
+
+
 def snapshot(project: Path) -> dict[Path, bytes]:
     return {
         path.relative_to(project): path.read_bytes()

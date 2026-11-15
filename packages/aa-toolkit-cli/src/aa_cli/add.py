@@ -94,23 +94,47 @@ def _declared_dependencies(pyproject: Path) -> set[str]:
     except OSError, UnicodeDecodeError, tomllib.TOMLDecodeError:
         return set()
     project = _as_dict(config.get("project"))
-    optional = _as_dict(project.get("optional-dependencies"))
     dep_groups = _as_dict(config.get("dependency-groups"))
     uv_config = _as_dict(_as_dict(config.get("tool")).get("uv"))
-    groups = [
-        project.get("dependencies", []),
-        *optional.values(),
-        *dep_groups.values(),
-        uv_config.get("dev-dependencies", []),
-    ]
+    items: list[object] = []
+    for raw in (project.get("dependencies", []), uv_config.get("dev-dependencies", [])):
+        if isinstance(raw, list):
+            items.extend(raw)
+    seen: set[str] = set()
+    for group_name in _default_group_names(uv_config, dep_groups):
+        items.extend(_expand_group(dep_groups, group_name, seen))
     names: set[str] = set()
-    for group in groups:
-        if not isinstance(group, list):
-            continue
-        for item in group:
-            if isinstance(item, str) and (match := _REQ_NAME.match(item)):
-                names.add(_NORMALIZE.sub("-", match.group(1)).lower())
+    for item in items:
+        if isinstance(item, str) and (match := _REQ_NAME.match(item)):
+            names.add(_NORMALIZE.sub("-", match.group(1)).lower())
     return names
+
+
+def _default_group_names(uv_config: dict[str, Any], dep_groups: dict[str, Any]) -> list[str]:
+    default_groups = uv_config.get("default-groups")
+    if default_groups is None:
+        return ["dev"]
+    if default_groups == "all":
+        return list(dep_groups)
+    if isinstance(default_groups, list):
+        return [name for name in default_groups if isinstance(name, str)]
+    return []
+
+
+def _expand_group(dep_groups: dict[str, Any], name: str, seen: set[str]) -> list[object]:
+    if name in seen:
+        return []
+    seen.add(name)
+    group = dep_groups.get(name)
+    if not isinstance(group, list):
+        return []
+    expanded: list[object] = []
+    for item in group:
+        if isinstance(item, dict) and isinstance(inc := item.get("include-group"), str):
+            expanded.extend(_expand_group(dep_groups, inc, seen))
+        else:
+            expanded.append(item)
+    return expanded
 
 
 def _as_dict(value: object) -> dict[str, Any]:
