@@ -52,6 +52,22 @@ aa init my-app
 aa init my-app --github
 ```
 
+`aa redact [FILE]` prints a cleaned copy of a file, or of piped text when no file is given, using a `Redactor` from the [redaction library](packages/aa-toolkit-redact/README.md) with its defaults. Every sensitive value is replaced by a Placeholder such as `[EMAIL]`, and a value under a Sensitive name becomes `[REDACTED]`. The original file is never changed; redirect the output to save the cleaned copy. Each line is cleaned with its line ending and flushed as it arrives, and a private key that spans several lines is held back until its end line so its middle lines never slip out.
+
+`--with KIND` turns on the built-in Detectors that are off by default (`IP_ADDRESS`, `PHONE`). `--without KIND` turns off built-in Detectors that are on by default (`AWS_ACCESS_KEY`, `GITHUB_TOKEN`, `API_KEY`, `SLACK_TOKEN`, `JWT`, `BEARER_TOKEN`, `PRIVATE_KEY`, `URL_PASSWORD`, `EMAIL`, `CARD`). Both flags are case-insensitive and accept commas or repetition. Patterns alone cannot find names, street addresses, or secrets with no recognizable prefix, so redaction lowers risk and does not guarantee safety ([ADR 0004](docs/adr/0004-redaction-library-without-dependencies.md)): still read what you share.
+
+```bash
+aa redact app.log
+```
+
+```bash
+aa redact app.log > clean.log
+```
+
+```bash
+docker logs -f web | aa redact --with ip_address,phone --without card
+```
+
 ## Develop
 
 ```bash
@@ -197,7 +213,9 @@ Every `aa` command follows the same rules, so scripts and AI agents can rely on 
 | `target_not_empty` | `1` | `aa init` found the target folder already has something in it. Nothing was changed. |
 | `target_in_workspace` | `1` | `aa init` found an outer uv workspace whose `members` would include the target. The fix names the `exclude` entry to add. Nothing was changed. |
 | `step_failed` | `1` | An `aa init` step failed. The message names the step and what went wrong. The folder is left as it is, and the message says to delete it before running `aa init` again. When creating the GitHub repo fails, the fix is the `gh repo create` command to rerun from inside the project, or `git push --set-upstream origin main` when the repo was created and only the push failed. |
-| `usage` | `2` | Bad or conflicting flags, a missing argument, or an `aa init` name that breaks the name rule. Nothing was created. |
+| `file_not_found` | `1` | `aa redact` was given a file path that does not exist. The message names the path. |
+| `cannot_read` | `1` | `aa redact` was given a folder or a file that cannot be read. The message says why. |
+| `usage` | `2` | Bad or conflicting flags, a missing argument, an `aa init` name that breaks the name rule, or `aa redact` with no file and a terminal for standard input. Nothing was created. |
 | `aborted` | `130` | Ctrl+C stopped the command. When `aa init` had started writing, the message says the folder was left as it is. |
 | `unexpected` | `3` | An uncaught error, such as uv, git or gh missing from PATH. Rerun with `--verbose` for the traceback. |
 

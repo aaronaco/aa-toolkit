@@ -1,5 +1,6 @@
 import _thread
 import contextlib
+import io
 import json
 import os
 import shutil
@@ -240,6 +241,25 @@ def machine(new_machine: Callable[[], Machine]) -> Machine:
     return new_machine()
 
 
+class _TerminalStdin(io.TextIOWrapper):
+    name = "<stdin>"
+    mode = "r"
+
+    def isatty(self) -> bool:
+        return True
+
+
+class _Runner(CliRunner):
+    """A ``CliRunner`` whose ``sys.stdin`` is a terminal until ``input`` is passed."""
+
+    @contextlib.contextmanager
+    def isolation(self, input=None, env=None, color=False):
+        with super().isolation(input=input, env=env, color=color) as streams:
+            if input is None:
+                sys.stdin = _TerminalStdin(io.BytesIO(), encoding=self.charset)
+            yield streams
+
+
 @pytest.fixture(scope="session")
 def aa_in():
     """Run the aa command in process from ``cwd``; usable from fixtures of any scope.
@@ -247,9 +267,19 @@ def aa_in():
     AA_JSON is cleared unless ``env`` sets it, so a developer's own setting never leaks in.
     """
 
-    def run(cwd: Path, *args: str, env: dict[str, str | None] | None = None):
+    def run(
+        cwd: Path,
+        *args: str,
+        stdin: str | bytes | None = None,
+        env: dict[str, str | None] | None = None,
+    ):
         with contextlib.chdir(cwd):
-            return CliRunner().invoke(app, list(args), env={"AA_JSON": None, **(env or {})})
+            return _Runner().invoke(
+                app,
+                list(args),
+                input=stdin,
+                env={"AA_JSON": None, **(env or {})},
+            )
 
     return run
 
@@ -273,7 +303,7 @@ def _no_ambient_json(monkeypatch):
 def aa(aa_in, tmp_path, monkeypatch):
     """Run the aa command in process from the current folder, at first an empty temporary one."""
     monkeypatch.chdir(tmp_path)
-    return lambda *args, env=None: aa_in(Path.cwd(), *args, env=env)
+    return lambda *args, stdin=None, env=None: aa_in(Path.cwd(), *args, stdin=stdin, env=env)
 
 
 @pytest.fixture

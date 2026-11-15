@@ -33,6 +33,15 @@ from aa_cli.output import (
     VerboseFlag,
     configure_logging,
 )
+from aa_cli.redact import (
+    WITH_KINDS,
+    WITHOUT_KINDS,
+    FileError,
+    UnknownKind,
+    build_redactor,
+    clean_text,
+    redact_file,
+)
 
 log = logging.getLogger("aa")
 
@@ -222,6 +231,54 @@ def _refuse_bad_name(ctx: typer.Context, name: str) -> None:
         return
     label = f"the current folder's name '{project_name}'" if name == "." else f"'{name}'"
     raise typer.BadParameter(f"{label} breaks the rule: {NAME_RULE}", ctx=ctx, param_hint="'NAME'")
+
+
+@app.command()
+def redact(
+    ctx: typer.Context,
+    file: Annotated[
+        Path | None,
+        typer.Argument(metavar="FILE", help="The file to clean, or standard input when omitted."),
+    ] = None,
+    with_kinds: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--with",
+            metavar="KIND",
+            help=f"Also hide these off-by-default kinds: {', '.join(WITH_KINDS)}.",
+        ),
+    ] = None,
+    without_kinds: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--without",
+            metavar="KIND",
+            help=f"Leave these built-in kinds visible: {', '.join(WITHOUT_KINDS)}.",
+        ),
+    ] = None,
+    json_output: JsonFlag = False,
+    verbose: VerboseFlag = False,
+) -> None:
+    """Print a cleaned copy of a file or piped text."""
+    out: Output = ctx.obj
+    try:
+        redactor = build_redactor(with_kinds or (), without_kinds or ())
+    except UnknownKind as exc:
+        raise typer.BadParameter(str(exc), ctx=ctx, param_hint=f"'{exc.flag}'") from exc
+    if file is None and sys.stdin.isatty():
+        raise typer.BadParameter(
+            "give a file or pipe text in, e.g. 'aa redact app.log' or 'cmd | aa redact'",
+            ctx=ctx,
+            param_hint="'FILE'",
+        )
+    try:
+        if out.json:
+            out.success({"text": clean_text(file, redactor)}, human="")
+        else:
+            redact_file(file, redactor)
+    except FileError as exc:
+        out.failure(exc.code, str(exc))
+        raise typer.Exit(ExitCode.PROBLEMS) from exc
 
 
 @app.command(hidden=True)

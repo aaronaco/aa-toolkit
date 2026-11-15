@@ -5,6 +5,7 @@ description = "The aa command."
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "aa-toolkit-redact",
     "typer>=0.27.3",
 ]
 
@@ -14,6 +15,9 @@ aa = "aa_cli.cli:main"
 [build-system]
 requires = ["uv_build>=0.13.7,<0.14"]
 build-backend = "uv_build"
+
+[tool.uv.sources]
+aa-toolkit-redact = { workspace = true }
 
 [tool.uv.build-backend]
 module-name = "aa_cli"
