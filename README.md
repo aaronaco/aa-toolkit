@@ -92,7 +92,7 @@ The toolkit needs uv 0.13.7 exactly. `required-version` in `pyproject.toml` sets
 uv self update 0.13.7
 ```
 
-Dependabot doesn't change `required-version`, so upgrade uv by hand: pick a release at least 7 days old and change `required-version`.
+Dependabot doesn't change `required-version`, so upgrade uv by hand: pick a release at least 7 days old, change `required-version`, and change the version in this section to match.
 
 uv packages get a 7-day cooldown from `exclude-newer = "7 days"` in `pyproject.toml`. uv skips any file uploaded less than 7 days ago, so `uv lock --upgrade` and `uv lock --upgrade-package` only reach versions at least that old. A file added later to an old release waits 7 days too. Workspace members aren't affected. `uv.lock` records the window, not a date, so it doesn't go stale as days pass. uv only moves the cutoff when it resolves again.
 
