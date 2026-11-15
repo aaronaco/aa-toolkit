@@ -80,9 +80,31 @@ uv run lint-imports
 
 `lint-imports` fails when one library imports another, as [ADR 0001](docs/adr/0001-single-workspace-independent-libraries.md) requires. It also runs as a commit hook.
 
-ty is in beta and can change its diagnostics in any release, so `uv.lock` pins its exact version. Upgrade it by hand with `uv lock --upgrade-package ty`.
+ty is in beta and can change its diagnostics in any release, so `uv.lock` pins its exact version. Upgrade it by hand with `uv lock --upgrade-package ty`. Like every uv upgrade here, it only reaches a version at least 7 days old.
 
 The toolkit needs Python 3.14 or newer. Development uses the Python 3.15 pinned in `.python-version`.
+
+### uv version and cooldown
+
+The toolkit needs uv 0.13.7 exactly. `required-version` in `pyproject.toml` sets it, and CI installs the version it names. Any other uv stops on every project command with an error that names the version. If you installed uv with the standalone installer, get it with:
+
+```bash
+uv self update 0.13.7
+```
+
+Dependabot doesn't change `required-version`, so upgrade uv by hand: pick a release at least 7 days old, change `required-version`, and change the version in this section to match.
+
+uv packages get a 7-day cooldown from `exclude-newer = "7 days"` in `pyproject.toml`. uv skips any file uploaded less than 7 days ago, so `uv lock --upgrade` and `uv lock --upgrade-package` only reach versions at least that old. A file added later to an old release waits 7 days too. Workspace members aren't affected. `uv.lock` records the window, not a date, so it doesn't go stale as days pass. uv only moves the cutoff when it resolves again.
+
+The error doesn't say "too new". A version under 7 days old is treated as if it doesn't exist, so raising a floor to one fails with "only ruff<=0.17.4 is available", even though 0.17.5 is out. uv 0.13.7 may add a `hint:` naming the cutoff. When a version you know exists can't be found, check its upload date first.
+
+To let an urgent security fix through, give that package an exception under `[tool.uv]`: `false` turns the cooldown off for it, or a shorter window lets it through sooner.
+
+```toml
+exclude-newer-package = { ruff = false }
+```
+
+Remove the exception once every file of that version is more than 7 days old. A file uploaded later, such as a new wheel, waits its own 7 days, and without the exception uv leaves it out of the lock. The `uv audit` workflow is what flags packages that need one.
 
 ### Commit hooks
 

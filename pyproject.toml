@@ -7,6 +7,8 @@ dependencies = ["aa-toolkit-cli", "aa-toolkit-log", "aa-toolkit-redact"]
 
 [tool.uv]
 package = false
+required-version = "==0.13.7"  # exact: CI reads it, and setup-uv installs the top match of a range
+exclude-newer = "7 days"  # cooldown: skip any file uploaded less than 7 days ago
 
 [tool.uv.workspace]
 members = ["packages/*"]

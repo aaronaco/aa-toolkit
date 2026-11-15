@@ -26,7 +26,7 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@v10.3.3
         with:
-          version: "0.13.7"
+          version-file: pyproject.toml
           python-version: ${{ matrix.python }}
       - run: uv python install
       - run: uv sync --locked
@@ -47,7 +47,7 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@v10.3.3
         with:
-          version: "0.13.7"
+          version-file: pyproject.toml
       - run: uv python install
       # Not uv sync: all workspace members share one .venv, where an undeclared import still works.
       - run: uv run --locked --isolated --no-default-groups --package aa-toolkit-log python -I packages/aa-toolkit-log/tests/alone_app.py
@@ -61,7 +61,7 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@v10.3.3
         with:
-          version: "0.13.7"
+          version-file: pyproject.toml
       - run: uv python install
       # Not uv sync, for the same reason as the log library's check.
       - run: uv run --locked --isolated --no-default-groups --package aa-toolkit-redact python -I packages/aa-toolkit-redact/tests/alone_app.py
@@ -81,7 +81,7 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@v10.3.3
         with:
-          version: "0.13.7"
+          version-file: pyproject.toml
       - run: uv python install
       - run: uv sync --locked
       - run: uv run --locked pytest --cov=aa_cli --cov=aa_log --cov=aa_redact --cov-report=xml
