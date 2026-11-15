@@ -79,6 +79,16 @@ app.log:3:6: EMAIL
 app.log:3:23: GITHUB_TOKEN
 ```
 
+`aa commands` lists every visible command with its summary. With `--json` (or `AA_JSON=1`), it follows the Output contract and describes the exit codes, the global flags (`--json`, `--verbose`, `--version`), and each command's summary, arguments, options and effect (`read` or `write`), so an agent or script can learn how to run `aa` without reading `--help`.
+
+```bash
+aa commands
+```
+
+```bash
+aa commands --json
+```
+
 ## Develop
 
 ```bash
