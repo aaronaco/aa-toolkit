@@ -123,8 +123,10 @@ def test_the_independence_check_covers_every_library_and_only_libraries(repo, py
     )
 
     assert libraries == sorted(LIBRARIES)
-    assert sorted(settings["root_packages"]) == libraries
-    assert [sorted(rule["modules"]) for rule in settings["contracts"]] == [libraries]
+    # aa_cli is a root package too, for the Crash report rule; it is never in the independence one.
+    assert sorted(settings["root_packages"]) == sorted([*libraries, "aa_cli"])
+    independence = [rule for rule in settings["contracts"] if rule["type"] == "independence"]
+    assert [sorted(rule["modules"]) for rule in independence] == [libraries]
 
 
 @pytest.mark.parametrize(

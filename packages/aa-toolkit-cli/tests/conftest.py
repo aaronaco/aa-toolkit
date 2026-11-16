@@ -368,6 +368,23 @@ def _no_ambient_json(monkeypatch):
     monkeypatch.delenv("AA_JSON", raising=False)
 
 
+@pytest.fixture(autouse=True)
+def local_app_data(tmp_path_factory: pytest.TempPathFactory, monkeypatch) -> Path:
+    """Point LOCALAPPDATA at a temporary folder, so no test writes a Crash report into the real one.
+
+    It sits outside ``tmp_path``, so tests that check their folder stays empty still can.
+    """
+    folder = tmp_path_factory.mktemp("localappdata")
+    monkeypatch.setenv("LOCALAPPDATA", str(folder))
+    return folder
+
+
+@pytest.fixture
+def crash_folder(local_app_data: Path) -> Path:
+    """Where aa saves Crash reports during a test."""
+    return local_app_data / "aa" / "crash"
+
+
 @pytest.fixture
 def aa(aa_in, tmp_path, monkeypatch):
     """Run the aa command in process from the current folder, at first an empty temporary one."""

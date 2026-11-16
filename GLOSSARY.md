@@ -72,6 +72,10 @@ _Avoid_: feature, add-on, extra, plugin, module
 The promise every `aa` command keeps to whoever runs it, whether a person, a script or an agent: one machine-readable answer when asked for one, logs kept apart from that answer, the same exit codes everywhere, and never waiting for input no one can give.
 _Avoid_: contract (on its own, or for anything else), API, interface
 
+**Crash report**:
+The file `aa` saves on the user's computer when a command fails with an unexpected error. It holds what's needed to fix the bug, with sensitive values taken out, and is never uploaded.
+_Avoid_: crash log, dump, bug report, telemetry
+
 **Release**:
 Choosing a project's next version, recording its changelog and tagging it.
 _Avoid_: ship, deploy

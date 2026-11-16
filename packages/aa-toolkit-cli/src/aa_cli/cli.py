@@ -7,7 +7,7 @@ import os
 import re
 import shlex
 import sys
-from collections.abc import Generator, Sequence
+from collections.abc import Callable, Generator, Sequence
 from importlib.metadata import version
 from pathlib import Path
 from typing import Annotated, Any
@@ -17,6 +17,7 @@ from typer.core import TyperGroup
 
 from aa_cli.add import AddError, Piece, add_piece
 from aa_cli.commands import Effect, describe_cli, format_commands
+from aa_cli.crash import REDACTION_FAILED, crash_folder, save_report
 from aa_cli.init import (
     NAME_RULE,
     Kind,
@@ -69,7 +70,9 @@ class AaGroup(TyperGroup):
         windows_expand_args: bool = True,
         **extra: Any,  # noqa: ANN401  # mirrors TyperGroup.main
     ) -> Any:  # noqa: ANN401  # mirrors TyperGroup.main
-        out = Output.from_args(sys.argv[1:] if args is None else args, os.environ)
+        raw_args = sys.argv[1:] if args is None else list(args)
+        out = Output.from_args(raw_args, os.environ)
+        command = self._command_name(raw_args)
         configure_logging(out.verbose)
         log.debug("aa %s on Python %s", version("aa-toolkit-cli"), sys.version.split()[0])
         try:
@@ -86,14 +89,23 @@ class AaGroup(TyperGroup):
         except typer.TyperException as exc:
             # Typer gives every usage error (bad flag, missing argument) exit code 2.
             if exc.exit_code != ExitCode.USAGE:
-                code = _report_unexpected_error(out, exc)
+                code = _report_unexpected_error(out, exc, command)
             else:
                 code = _report_usage_error(out, exc)
         except Aborted as exc:
             code = _report_aborted(out, exc)
         except Exception as exc:
-            code = _report_unexpected_error(out, exc)
+            code = _report_unexpected_error(out, exc, command)
         sys.exit(code if isinstance(code, int) else ExitCode.OK)
+
+    def _command_name(self, args: Sequence[str]) -> str | None:
+        """The subcommand's name, never its arguments, for a Crash report.
+
+        The root takes only flags, so the first word that isn't a flag names the subcommand.
+        Anything that isn't a known command name gives None.
+        """
+        first = next((arg for arg in args if not arg.startswith("-")), None)
+        return first if first in self.commands else None
 
     # TyperGroup.invoke takes a Context type that Typer doesn't export; typer.Context subclasses it.
     def invoke(self, ctx: typer.Context) -> Any:  # noqa: ANN401  # ty: ignore[invalid-method-override]
@@ -145,12 +157,58 @@ def _report_aborted(out: Output, exc: Aborted) -> ExitCode:
     return ExitCode.ABORTED
 
 
-def _report_unexpected_error(out: Output, exc: Exception) -> ExitCode:
+def _report_unexpected_error(out: Output, exc: Exception, command: str | None) -> ExitCode:
     log.debug("Unexpected error", exc_info=exc)
     detail = str(exc).splitlines()[0] if str(exc) else ""
     message = f"{type(exc).__name__}: {detail}" if detail else type(exc).__name__
-    out.failure("unexpected", message)
+    redact = _default_redactor()
+    out.failure(
+        "unexpected",
+        _redact_message(redact, message),
+        fix=_save_crash_report(exc, command, message, redact),
+    )
     return ExitCode.UNEXPECTED
+
+
+def _default_redactor() -> Callable[[str], str]:
+    """The Redactor ``aa redact`` uses with its default kinds, or one that hides everything."""
+    try:
+        return build_redactor()
+    except Exception:
+        log.debug("Could not build the Redactor", exc_info=True)
+        return _redaction_failed
+
+
+def _redaction_failed(text: str) -> str:
+    return REDACTION_FAILED
+
+
+def _redact_message(redact: Callable[[str], str], message: str) -> str:
+    try:
+        return redact(message)
+    except Exception:
+        log.debug("Could not redact the error message", exc_info=True)
+        return REDACTION_FAILED
+
+
+def _save_crash_report(
+    exc: Exception, command: str | None, message: str, redact: Callable[[str], str]
+) -> str | None:
+    """Save a Crash report and say where it is, or give None when it can't be saved."""
+    try:
+        path = save_report(
+            exc,
+            folder=crash_folder("aa"),
+            app="aa",
+            version=version("aa-toolkit-cli"),
+            command=command,
+            message=message,
+            redact=redact,
+        )
+    except Exception:
+        log.debug("Could not save a crash report", exc_info=True)
+        return None
+    return f"Attach {path} to a bug report"
 
 
 app = typer.Typer(cls=AaGroup, add_completion=False, pretty_exceptions_enable=False)
