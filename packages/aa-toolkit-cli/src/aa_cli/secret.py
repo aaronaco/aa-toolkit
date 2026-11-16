@@ -1,5 +1,13 @@
 """``aa secret``: where a Secret goes and what its value is, never printed."""
 
+__lazy_modules__ = {
+    "aa_settings",
+    "keyword",
+    "tomllib",
+    "unicodedata",
+    "warnings",
+}
+
 import keyword
 import sys
 import tomllib

@@ -6,6 +6,13 @@ creates, or into a library of its own, unchanged. The caller passes the cleaning
 function, like the log library's ``redact=`` (ADR 0005).
 """
 
+__lazy_modules__ = {
+    "contextlib",
+    "datetime",
+    "platform",
+    "traceback",
+}
+
 import contextlib
 import os
 import platform

@@ -1,5 +1,7 @@
 """Reading git's own configuration."""
 
+__lazy_modules__ = {"aa_cli.process"}
+
 from aa_cli.process import run
 
 

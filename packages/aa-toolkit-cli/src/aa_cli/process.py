@@ -1,5 +1,7 @@
 """Running the external tools aa wraps (uv, git, gh)."""
 
+__lazy_modules__ = {"shutil", "subprocess"}
+
 import logging
 import os
 import shutil

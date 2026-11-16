@@ -1,5 +1,14 @@
 """``aa init``: the steps that turn an empty folder into a project."""
 
+__lazy_modules__ = {
+    "aa_cli.git",
+    "aa_cli.process",
+    "datetime",
+    "importlib.resources",
+    "keyword",
+    "tomllib",
+}
+
 import contextlib
 import datetime
 import keyword
@@ -12,6 +21,7 @@ from enum import StrEnum
 from importlib.resources import files
 from pathlib import Path, PurePosixPath
 
+from aa_cli.choices import License
 from aa_cli.git import machine_config
 from aa_cli.process import run
 
@@ -40,11 +50,6 @@ _GITHUB_URL = re.compile(r"https://\S+")
 class Kind(StrEnum):
     CLI = "cli"
     LIB = "lib"
-
-
-class License(StrEnum):
-    MIT = "MIT"
-    NONE = "none"
 
 
 # The package code and the starter test each kind starts with.
