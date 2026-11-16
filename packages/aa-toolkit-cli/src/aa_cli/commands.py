@@ -2,14 +2,14 @@
 
 import inspect
 import types
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, Union, get_args, get_origin, get_type_hints
 
 import typer
-from typer.core import TyperArgument, TyperGroup, TyperOption
+from typer.core import TyperArgument, TyperCommand, TyperGroup, TyperOption
 
 from aa_cli.output import ExitCode
 
@@ -136,6 +136,44 @@ def _describe_option(
     return entry
 
 
+def _visible_commands(group: TyperGroup, prefix: str = "") -> Iterator[tuple[str, TyperCommand]]:
+    """Each visible command by its full name; a group gives its commands, not itself."""
+    for name, cmd in group.commands.items():
+        if cmd.hidden:
+            continue
+        full_name = f"{prefix}{name}"
+        if isinstance(cmd, TyperGroup):
+            yield from _visible_commands(cmd, f"{full_name} ")
+        elif isinstance(cmd, TyperCommand):
+            yield full_name, cmd
+
+
+def _describe_command(
+    name: str, cmd: TyperCommand, effects: Mapping[str, Effect], global_flags: set[str]
+) -> dict[str, Any]:
+    if name not in effects:
+        raise KeyError(f"Missing effect declaration for command {name!r}")
+    cmd_hints, cmd_sig = _callback_info(cmd.callback)
+    arguments = [
+        _describe_argument(param, cmd_hints, cmd_sig)
+        for param in cmd.params
+        if isinstance(param, TyperArgument)
+    ]
+    options = [
+        _describe_option(param, cmd_hints, cmd_sig)
+        for param in cmd.params
+        if isinstance(param, TyperOption) and not param.hidden and param.opts[0] not in global_flags
+    ]
+    summary = cmd.help.splitlines()[0] if cmd.help else ""
+    return {
+        "name": name,
+        "summary": summary,
+        "effect": str(effects[name]),
+        "arguments": arguments,
+        "options": options,
+    }
+
+
 def describe_cli(app: typer.Typer, effects: Mapping[str, Effect]) -> dict[str, Any]:
     """Return the exit codes, global flags and visible commands of ``app``."""
     group = typer.main.get_command(app)
@@ -148,35 +186,10 @@ def describe_cli(app: typer.Typer, effects: Mapping[str, Effect]) -> dict[str, A
         if isinstance(param, TyperOption) and not param.hidden
     ]
     global_flags = {opt["flag"] for opt in global_options}
-    commands: list[dict[str, Any]] = []
-    for name, cmd in group.commands.items():
-        if cmd.hidden:
-            continue
-        if name not in effects:
-            raise KeyError(f"Missing effect declaration for command {name!r}")
-        cmd_hints, cmd_sig = _callback_info(cmd.callback)
-        arguments = [
-            _describe_argument(param, cmd_hints, cmd_sig)
-            for param in cmd.params
-            if isinstance(param, TyperArgument)
-        ]
-        options = [
-            _describe_option(param, cmd_hints, cmd_sig)
-            for param in cmd.params
-            if isinstance(param, TyperOption)
-            and not param.hidden
-            and param.opts[0] not in global_flags
-        ]
-        summary = (cmd.help or "").splitlines()[0] if cmd.help else ""
-        commands.append(
-            {
-                "name": name,
-                "summary": summary,
-                "effect": str(effects[name]),
-                "arguments": arguments,
-                "options": options,
-            }
-        )
+    commands = [
+        _describe_command(full_name, cmd, effects, global_flags)
+        for full_name, cmd in _visible_commands(group)
+    ]
     return {
         "exit_codes": [{"code": int(code), "meaning": code.meaning} for code in ExitCode],
         "global_options": global_options,

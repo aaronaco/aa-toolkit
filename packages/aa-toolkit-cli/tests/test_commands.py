@@ -1,6 +1,7 @@
 """``aa commands``: machine-readable and human description of aa commands."""
 
 import json
+import re
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -166,6 +167,55 @@ def test_commands_entry_is_listed_with_read_effect(aa) -> None:
     assert commands_cmd["options"] == []
 
 
+@pytest.mark.parametrize(
+    ("name", "summary"),
+    [
+        ("secret set", "Save a Secret in the Secret store."),
+        ("secret delete", "Delete a Secret from the Secret store."),
+    ],
+)
+def test_secret_entries_are_listed_by_full_name_with_name_app_and_write_effect(
+    aa, name: str, summary: str
+) -> None:
+    result = aa("commands", "--json")
+
+    assert result.exit_code == 0, result.output
+    cmd = _command_by_name(json.loads(result.stdout)["data"], name)
+    assert cmd["summary"] == summary
+    assert cmd["effect"] == "write"
+    assert [arg["name"] for arg in cmd["arguments"]] == ["NAME"]
+    name_arg = cmd["arguments"][0]
+    assert name_arg["type"] == "string"
+    assert name_arg["required"] is True
+    assert name_arg["help"]
+    assert [opt["flag"] for opt in cmd["options"]] == ["--app"]
+    app_opt = cmd["options"][0]
+    assert app_opt["type"] == "string"
+    assert app_opt["default"] is None
+    assert app_opt["choices"] is None
+    assert app_opt["required"] is False
+    assert app_opt["repeatable"] is False
+    assert app_opt["help"]
+
+
+def test_the_secret_group_is_not_listed_on_its_own(aa) -> None:
+    result = aa("commands", "--json")
+
+    assert result.exit_code == 0, result.output
+    names = [cmd["name"] for cmd in json.loads(result.stdout)["data"]["commands"]]
+    assert "secret" not in names
+
+
+def test_a_command_with_no_declared_effect_fails_by_its_full_name(monkeypatch) -> None:
+    from aa_cli import cli
+    from aa_cli.commands import describe_cli
+
+    effects = {k: v for k, v in cli.COMMAND_EFFECTS.items() if k != "secret delete"}
+
+    with pytest.raises(KeyError, match="secret delete"):
+        describe_cli(app, effects)
+
+
 def test_crash_never_appears_and_no_command_repeats_global_flags(aa) -> None:
     json_result = aa("commands", "--json")
     human_result = aa("commands")
@@ -188,11 +238,13 @@ def test_commands_in_human_mode_prints_each_visible_command_with_its_summary(aa)
 
     assert result.exit_code == 0, result.output
     assert result.stderr == ""
-    assert [line.split(None, 1) for line in result.stdout.splitlines()] == [
+    assert [re.split(r"\s{2,}", line, maxsplit=1) for line in result.stdout.splitlines()] == [
         ["add", "Add a piece to the project in the current folder."],
         ["init", "Create a project in a new or empty folder."],
         ["redact", "Print a cleaned copy of a file or piped text."],
         ["commands", "List every command, its arguments, flags and exit codes."],
+        ["secret set", "Save a Secret in the Secret store."],
+        ["secret delete", "Delete a Secret from the Secret store."],
     ]
 
 

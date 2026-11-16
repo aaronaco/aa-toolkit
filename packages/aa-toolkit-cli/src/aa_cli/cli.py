@@ -49,6 +49,8 @@ from aa_cli.redact import (
     find_all,
     redact_file,
 )
+from aa_cli.secret import NotUtf8, field_name, project_name, read_piped_value
+from aa_settings import SecretStoreError, delete_secret, save_secret
 
 log = logging.getLogger("aa")
 
@@ -425,11 +427,154 @@ def redact(
         raise typer.Exit(ExitCode.PROBLEMS) from exc
 
 
+secret_app = typer.Typer(no_args_is_help=True)
+app.add_typer(secret_app, name="secret")
+
+
+@secret_app.callback()
+def secret(json_output: JsonFlag = False, verbose: VerboseFlag = False) -> None:
+    """Save or delete a Secret in the Secret store. No command prints one back."""
+
+
+SecretName = Annotated[
+    str,
+    typer.Argument(
+        metavar="NAME",
+        help="The field name in the app's Settings class, such as api_key.",
+        show_default=False,
+    ),
+]
+AppOption = Annotated[
+    str | None,
+    typer.Option(
+        "--app",
+        help="The app name. Default: [project].name in pyproject.toml in the current folder.",
+    ),
+]
+
+
+def _secret_target(ctx: typer.Context, name: str, app_name: str | None) -> tuple[str, str]:
+    """Return the app name and the field name, or raise a usage error."""
+    field = field_name(name)
+    if field is None:
+        # NAME isn't echoed: it may be a value given by mistake.
+        raise typer.BadParameter(
+            "not a name a Settings field can have, such as api_key", ctx=ctx, param_hint="'NAME'"
+        )
+    if app_name is not None:
+        if not app_name:
+            raise typer.BadParameter("must not be empty", ctx=ctx, param_hint="'--app'")
+        return app_name, field
+    found = project_name(Path.cwd())
+    if found is None:
+        raise typer.BadParameter(
+            "give the app name, because no pyproject.toml here has a [project] name",
+            ctx=ctx,
+            param_hint="'--app'",
+        )
+    return found, field
+
+
+_STDIN_HINT = "'standard input'"
+
+
+def _secret_value(ctx: typer.Context, out: Output, name: str) -> str:
+    """Read the value from a hidden prompt or from piped standard input."""
+    if sys.stdin.isatty():
+        if out.json:
+            raise typer.BadParameter(
+                "with --json, pipe the value in, e.g. 'cmd | aa secret set NAME --json'",
+                ctx=ctx,
+                param_hint=_STDIN_HINT,
+            )
+        try:
+            value: str = typer.prompt(
+                f"Value for {name}", default="", show_default=False, hide_input=True, err=True
+            )
+        except typer.Abort as exc:
+            raise Aborted() from exc
+    else:
+        try:
+            value = read_piped_value()
+        except NotUtf8 as exc:
+            raise typer.BadParameter(str(exc), ctx=ctx, param_hint=_STDIN_HINT) from None
+    if not value:
+        raise typer.BadParameter(
+            "the value is empty, so nothing was saved", ctx=ctx, param_hint=_STDIN_HINT
+        )
+    return value
+
+
+def _no_secret_store(out: Output, exc: SecretStoreError) -> typer.Exit:
+    """Report a missing Secret store; any other store failure stays unexpected."""
+    if not exc.no_store:
+        raise exc
+    out.failure("no_secret_store", str(exc))
+    return typer.Exit(ExitCode.PROBLEMS)
+
+
+@secret_app.command("set")
+def secret_set(
+    ctx: typer.Context,
+    name: SecretName,
+    app_name: AppOption = None,
+    json_output: JsonFlag = False,
+    verbose: VerboseFlag = False,
+) -> None:
+    """Save a Secret in the Secret store.
+
+    The value comes from a hidden prompt, or from piped standard input without
+    one trailing line ending. It's never an argument and never printed.
+    """
+    out: Output = ctx.obj
+    target, name = _secret_target(ctx, name, app_name)
+    value = _secret_value(ctx, out, name)
+    try:
+        replaced = save_secret(target, name, value)
+    except SecretStoreError as exc:
+        raise _no_secret_store(out, exc) from None
+    except ValueError as exc:
+        # NAME, the app name and the value are checked above, so only the size is left.
+        out.failure("secret_too_large", str(exc))
+        raise typer.Exit(ExitCode.PROBLEMS) from None
+    verb = "Replaced" if replaced else "Saved"
+    out.success(
+        {"app": target, "name": name, "replaced": replaced},
+        human=f"{verb} {name} for {target} in the Secret store.",
+    )
+
+
+@secret_app.command("delete")
+def secret_delete(
+    ctx: typer.Context,
+    name: SecretName,
+    app_name: AppOption = None,
+    json_output: JsonFlag = False,
+    verbose: VerboseFlag = False,
+) -> None:
+    """Delete a Secret from the Secret store."""
+    out: Output = ctx.obj
+    target, name = _secret_target(ctx, name, app_name)
+    try:
+        existed = delete_secret(target, name)
+    except SecretStoreError as exc:
+        raise _no_secret_store(out, exc) from None
+    if not existed:
+        out.failure("secret_not_found", f"No Secret {name} is saved for {target}; nothing changed")
+        raise typer.Exit(ExitCode.PROBLEMS)
+    out.success(
+        {"app": target, "name": name},
+        human=f"Deleted {name} for {target} from the Secret store.",
+    )
+
+
 COMMAND_EFFECTS: dict[str, Effect] = {
     "add": Effect.WRITE,
     "init": Effect.WRITE,
     "redact": Effect.READ,
     "commands": Effect.READ,
+    "secret set": Effect.WRITE,
+    "secret delete": Effect.WRITE,
 }
 
 

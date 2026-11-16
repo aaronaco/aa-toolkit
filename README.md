@@ -86,6 +86,26 @@ app.log:3:6: EMAIL
 app.log:3:23: GITHUB_TOKEN
 ```
 
+`aa secret set NAME` saves a Secret in the Secret store (Credential Manager on Windows), so no file in your project has to hold it. `NAME` is the field name in your app's Settings class, such as `api_key`, so it must be a name a field can have: a valid Python name that doesn't start with `_` and isn't one pydantic reserves, such as `model_config`. The Secret is saved for the app named by `--app`, or else by `[project].name` in `pyproject.toml` in the current folder. Your Settings class's `app_name` must match that name, or the [Settings library](packages/aa-toolkit-settings/README.md) won't find the Secret. At a terminal, `aa secret set` asks for the value at a hidden prompt. Piped text is read to the end, without one trailing line ending, so a file that ends with a line break saves without it. The value is never an argument of `aa`, and no output or error ever prints it. The command you pipe from is another matter: `echo sk-live-abc123 | aa secret set api_key` puts the value in your shell history, so pipe from a file or a password manager instead, or use the prompt. An empty value is refused, and so is one over Credential Manager's limit of 2560 bytes. Saving over an existing Secret replaces it and says `Replaced`. With `--json` (or `AA_JSON=1`), pipe the value in: a terminal is a usage error, because JSON mode never waits for input. `data` holds `app`, `name` and `replaced`.
+
+```bash
+aa secret set api_key
+```
+
+```bash
+cat api_key.txt | aa secret set api_key --app my-app --json
+```
+
+```text
+{"ok": true, "data": {"app": "my-app", "name": "api_key", "replaced": false}}
+```
+
+`aa secret delete NAME` removes a saved Secret, with the same `--app` rule. A Secret that isn't saved is the error `secret_not_found`. There is no command to show a saved Secret or to list them: printing a Secret defeats the point.
+
+```bash
+aa secret delete api_key
+```
+
 `aa commands` lists every visible command with its summary. With `--json` (or `AA_JSON=1`), it follows the Output contract and describes the exit codes, the global flags (`--json`, `--verbose`, `--version`), and each command's summary, arguments, options and effect (`read` or `write`), so an agent or script can learn how to run `aa` without reading `--help`.
 
 ```bash
@@ -243,9 +263,12 @@ Every `aa` command follows the same rules, so scripts and AI agents can rely on 
 | `step_failed` | `1` | An `aa init` step failed. The message names the step and what went wrong. When `aa init` had started writing, the folder is left as it is and the message says to delete it before running `aa init` again; a missing git `user.name` fails before anything is written. When creating the GitHub repo fails, the fix is the `gh repo create` command to rerun from inside the project, or `git push --set-upstream origin main` when the repo was created and only the push failed. |
 | `file_not_found` | `1` | `aa redact` was given a file path that does not exist. The message names the path. |
 | `cannot_read` | `1` | `aa redact` was given a folder or a file that cannot be read. The message says why. |
-| `usage` | `2` | Bad or conflicting flags, a missing argument, an `aa init` name that breaks the name rule, or `aa redact` with no file and a terminal for standard input. Nothing was created. |
-| `aborted` | `130` | Ctrl+C stopped the command. When `aa init` had started writing, the message says the folder was left as it is. |
-| `unexpected` | `3` | An uncaught error, such as uv, git or gh missing from PATH. `fix` names the Crash report saved for it (see the CLI README), or is null when the report can't be saved. Rerun with `--verbose` for the traceback. |
+| `secret_too_large` | `1` | `aa secret set` was given a value over Credential Manager's limit. The message gives its size and the limit in bytes, never the value. Nothing was saved. |
+| `secret_not_found` | `1` | `aa secret delete` found no saved Secret for that app and name. Nothing changed. |
+| `no_secret_store` | `1` | `aa secret set` or `aa secret delete` found no Secret store on this machine. |
+| `usage` | `2` | Bad or conflicting flags, a missing argument, an `aa init` name that breaks the name rule, `aa redact` with no file and a terminal for standard input, or for `aa secret`: a `NAME` no Settings field can have, no app name (the message names `--app`), an empty value, or `--json` with a terminal for standard input. Nothing was created. |
+| `aborted` | `130` | Ctrl+C stopped the command, including at the `aa secret set` prompt. When `aa init` had started writing, the message says the folder was left as it is. |
+| `unexpected` | `3` | An uncaught error, such as uv, git or gh missing from PATH, or a Secret store that fails (the message never holds the value). `fix` names the Crash report saved for it (see the CLI README), or is null when the report can't be saved. Rerun with `--verbose` for the traceback. |
 
 ## Security
 
