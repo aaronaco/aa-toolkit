@@ -196,6 +196,15 @@ def test_redact_help_lists_the_kinds_each_flag_takes(aa) -> None:
         assert kind in plain
 
 
+def test_plain_kind_names_match_the_detectors_the_cli_builds() -> None:
+    from aa_cli.redact import WITH_KINDS, WITHOUT_KINDS, build_redactor, with_detectors
+    from aa_redact import _detectors
+
+    assert WITH_KINDS == tuple(with_detectors())
+    assert WITHOUT_KINDS == tuple(_detectors.BUILT_IN)
+    build_redactor(with_values=WITH_KINDS, without_values=WITHOUT_KINDS)
+
+
 @pytest.mark.parametrize(
     ("args", "env"),
     [

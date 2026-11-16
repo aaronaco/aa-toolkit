@@ -1,5 +1,11 @@
 """``aa commands``: machine-readable and human description of aa commands."""
 
+__lazy_modules__ = {
+    "inspect",
+    "typer.core",
+    "types",
+}
+
 import inspect
 import types
 from collections.abc import Callable, Iterator, Mapping, Sequence
@@ -11,12 +17,8 @@ from typing import Any, Union, get_args, get_origin, get_type_hints
 import typer
 from typer.core import TyperArgument, TyperCommand, TyperGroup, TyperOption
 
+from aa_cli.choices import Effect
 from aa_cli.output import ExitCode
-
-
-class Effect(StrEnum):
-    READ = "read"
-    WRITE = "write"
 
 
 @dataclass(frozen=True)

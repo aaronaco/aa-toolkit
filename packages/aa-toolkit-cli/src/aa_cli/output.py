@@ -5,6 +5,8 @@ stdout: ``{"ok": true, "data": ...}`` on success and
 ``{"ok": false, "error": {"code", "message", "fix"}}`` on failure.
 """
 
+__lazy_modules__ = {"json"}
+
 import json
 import logging
 import sys

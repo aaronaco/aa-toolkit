@@ -1,12 +1,17 @@
 """``aa add``: setting up one piece in an existing project."""
 
+__lazy_modules__ = {
+    "aa_cli.init",
+    "tomllib",
+}
+
 import re
 import tomllib
 from dataclasses import dataclass
-from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from aa_cli.choices import Piece
 from aa_cli.init import (
     CI_TEMPLATE,
     CI_WORKFLOW,
@@ -34,11 +39,6 @@ _LOG_START_STEP = (
 _LOG_GITIGNORE_LINES = ("*.log", "*.log.[1-3]")
 _REQ_NAME = re.compile(r"\s*([A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)")
 _NORMALIZE = re.compile(r"[-_.]+")
-
-
-class Piece(StrEnum):
-    CI = "ci"
-    LOG = "log"
 
 
 class AddError(Exception):

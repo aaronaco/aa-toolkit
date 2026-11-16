@@ -1,5 +1,18 @@
 """The aa command."""
 
+__lazy_modules__ = {
+    "aa_cli.add",
+    "aa_cli.commands",
+    "aa_cli.crash",
+    "aa_cli.init",
+    "aa_cli.redact",
+    "aa_cli.secret",
+    "aa_settings",
+    "contextlib",
+    "io",
+    "shlex",
+}
+
 import contextlib
 import io
 import logging
@@ -8,20 +21,19 @@ import re
 import shlex
 import sys
 from collections.abc import Callable, Generator, Sequence
-from importlib.metadata import version
 from pathlib import Path
 from typing import Annotated, Any
 
 import typer
 from typer.core import TyperGroup
 
-from aa_cli.add import AddError, Piece, add_piece
-from aa_cli.commands import Effect, describe_cli, format_commands
+from aa_cli.add import AddError, add_piece
+from aa_cli.choices import WITH_KINDS, WITHOUT_KINDS, Effect, License, Piece
+from aa_cli.commands import describe_cli, format_commands
 from aa_cli.crash import REDACTION_FAILED, crash_folder, save_report
 from aa_cli.init import (
     NAME_RULE,
     Kind,
-    License,
     StepFailed,
     commit_and_push_to_github,
     create_project,
@@ -39,8 +51,6 @@ from aa_cli.output import (
     configure_logging,
 )
 from aa_cli.redact import (
-    WITH_KINDS,
-    WITHOUT_KINDS,
     FileError,
     UnknownKind,
     build_redactor,
@@ -74,7 +84,8 @@ class AaGroup(TyperGroup):
         out = Output.from_args(raw_args, os.environ)
         command = self._command_name(raw_args)
         configure_logging(out.verbose)
-        log.debug("aa %s on Python %s", version("aa-toolkit-cli"), sys.version.split()[0])
+        if log.isEnabledFor(logging.DEBUG):
+            log.debug("aa %s on Python %s", _package_version(), sys.version.split()[0])
         try:
             with _help_as_envelope(out):
                 code = super().main(
@@ -200,7 +211,7 @@ def _save_crash_report(
             exc,
             folder=crash_folder("aa"),
             app="aa",
-            version=version("aa-toolkit-cli"),
+            version=_package_version(),
             command=command,
             message=message,
             redact=redact,
@@ -214,9 +225,15 @@ def _save_crash_report(
 app = typer.Typer(cls=AaGroup, add_completion=False, pretty_exceptions_enable=False)
 
 
+def _package_version() -> str:
+    from importlib.metadata import version
+
+    return version("aa-toolkit-cli")
+
+
 def _show_version(ctx: typer.Context, value: bool) -> None:
     if value:
-        current = version("aa-toolkit-cli")
+        current = _package_version()
         ctx.obj.success({"version": current}, human=current)
         raise typer.Exit()
 

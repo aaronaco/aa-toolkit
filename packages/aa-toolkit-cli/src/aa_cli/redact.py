@@ -1,5 +1,10 @@
 """``aa redact``: cleaning a file or piped text with the redaction library."""
 
+__lazy_modules__ = {
+    "aa_redact",
+    "contextlib",
+}
+
 import contextlib
 import re
 import sys
@@ -7,27 +12,18 @@ from collections.abc import Callable, Generator, Iterable, Iterator, Sequence
 from pathlib import Path
 from typing import BinaryIO
 
+from aa_cli.choices import WITH_KINDS, WITHOUT_KINDS
 from aa_redact import Finding, Redactor, ip_address, phone_number
 
 type Detector = Callable[[str], Iterable[Finding]]
 
-WITH_DETECTORS: dict[str, Detector] = {
-    "IP_ADDRESS": ip_address,
-    "PHONE": phone_number,
-}
-WITH_KINDS: tuple[str, ...] = tuple(WITH_DETECTORS)
-WITHOUT_KINDS: tuple[str, ...] = (
-    "AWS_ACCESS_KEY",
-    "GITHUB_TOKEN",
-    "API_KEY",
-    "SLACK_TOKEN",
-    "JWT",
-    "BEARER_TOKEN",
-    "PRIVATE_KEY",
-    "URL_PASSWORD",
-    "EMAIL",
-    "CARD",
-)
+
+def with_detectors() -> dict[str, Detector]:
+    """Return the mapping from ``--with`` kind name to Detector."""
+    return {
+        "IP_ADDRESS": ip_address,
+        "PHONE": phone_number,
+    }
 
 
 class UnknownKind(Exception):
@@ -69,7 +65,8 @@ def _parse_kinds(flag: str, values: Sequence[str], allowed: Sequence[str]) -> li
 def build_redactor(with_values: Sequence[str] = (), without_values: Sequence[str] = ()) -> Redactor:
     with_kinds = _parse_kinds("--with", with_values, WITH_KINDS)
     without_kinds = _parse_kinds("--without", without_values, WITHOUT_KINDS)
-    detectors = [WITH_DETECTORS[kind] for kind in dict.fromkeys(with_kinds)]
+    detectors_by_kind = with_detectors()
+    detectors = [detectors_by_kind[kind] for kind in dict.fromkeys(with_kinds)]
     return Redactor(detectors=detectors, without=without_kinds, max_length=sys.maxsize)
 
 
