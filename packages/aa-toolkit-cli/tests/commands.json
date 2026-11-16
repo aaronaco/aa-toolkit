@@ -193,6 +193,54 @@
         "effect": "read",
         "arguments": [],
         "options": []
+      },
+      {
+        "name": "secret set",
+        "summary": "Save a Secret in the Secret store.",
+        "effect": "write",
+        "arguments": [
+          {
+            "name": "NAME",
+            "type": "string",
+            "required": true,
+            "help": "The field name in the app's Settings class, such as api_key."
+          }
+        ],
+        "options": [
+          {
+            "flag": "--app",
+            "type": "string",
+            "default": null,
+            "choices": null,
+            "required": false,
+            "repeatable": false,
+            "help": "The app name. Default: [project].name in pyproject.toml in the current folder."
+          }
+        ]
+      },
+      {
+        "name": "secret delete",
+        "summary": "Delete a Secret from the Secret store.",
+        "effect": "write",
+        "arguments": [
+          {
+            "name": "NAME",
+            "type": "string",
+            "required": true,
+            "help": "The field name in the app's Settings class, such as api_key."
+          }
+        ],
+        "options": [
+          {
+            "flag": "--app",
+            "type": "string",
+            "default": null,
+            "choices": null,
+            "required": false,
+            "repeatable": false,
+            "help": "The app name. Default: [project].name in pyproject.toml in the current folder."
+          }
+        ]
       }
     ]
   }
