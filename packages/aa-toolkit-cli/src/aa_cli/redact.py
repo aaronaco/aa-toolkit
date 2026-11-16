@@ -2,7 +2,6 @@
 
 __lazy_modules__ = {
     "aa_redact",
-    "contextlib",
 }
 
 import contextlib

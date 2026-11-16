@@ -3,7 +3,6 @@
 __lazy_modules__ = {
     "aa_cli.git",
     "aa_cli.process",
-    "contextlib",
     "datetime",
     "importlib.resources",
     "keyword",

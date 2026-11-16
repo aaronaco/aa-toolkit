@@ -8,7 +8,6 @@ __lazy_modules__ = {
     "aa_cli.redact",
     "aa_cli.secret",
     "aa_settings",
-    "contextlib",
     "io",
     "shlex",
 }
