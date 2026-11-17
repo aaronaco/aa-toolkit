@@ -188,6 +188,31 @@
         ]
       },
       {
+        "name": "prune",
+        "summary": "Remove Finished branches and their worktrees.",
+        "effect": "write",
+        "arguments": [
+          {
+            "name": "BRANCH",
+            "type": "array",
+            "required": false,
+            "help": "Only consider these local branches. Default: every local branch.",
+            "items": "string"
+          }
+        ],
+        "options": [
+          {
+            "flag": "--dry-run",
+            "type": "boolean",
+            "default": false,
+            "choices": null,
+            "required": false,
+            "repeatable": false,
+            "help": "Show what would be removed, without changing anything."
+          }
+        ]
+      },
+      {
         "name": "commands",
         "summary": "List every command, its arguments, flags and exit codes.",
         "effect": "read",

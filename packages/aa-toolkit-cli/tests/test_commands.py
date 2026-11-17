@@ -156,6 +156,26 @@ def test_redact_entry_describes_optional_file_repeatable_with_and_without_check_
     assert check_opt["help"]
 
 
+def test_prune_entry_describes_optional_branches_dry_run_and_write_effect(aa) -> None:
+    result = aa("commands", "--json")
+
+    assert result.exit_code == 0, result.output
+    prune_cmd = _command_by_name(json.loads(result.stdout)["data"], "prune")
+    assert prune_cmd["summary"] == "Remove Finished branches and their worktrees."
+    assert prune_cmd["effect"] == "write"
+    assert [arg["name"] for arg in prune_cmd["arguments"]] == ["BRANCH"]
+    branch_arg = prune_cmd["arguments"][0]
+    assert branch_arg["type"] == "array"
+    assert branch_arg["items"] == "string"
+    assert branch_arg["required"] is False
+    assert branch_arg["help"]
+    assert [opt["flag"] for opt in prune_cmd["options"]] == ["--dry-run"]
+    dry_run = prune_cmd["options"][0]
+    assert dry_run["type"] == "boolean"
+    assert dry_run["default"] is False
+    assert dry_run["help"]
+
+
 def test_commands_entry_is_listed_with_read_effect(aa) -> None:
     result = aa("commands", "--json")
 
@@ -242,6 +262,7 @@ def test_commands_in_human_mode_prints_each_visible_command_with_its_summary(aa)
         ["add", "Add a piece to the project in the current folder."],
         ["init", "Create a project in a new or empty folder."],
         ["redact", "Print a cleaned copy of a file or piped text."],
+        ["prune", "Remove Finished branches and their worktrees."],
         ["commands", "List every command, its arguments, flags and exit codes."],
         ["secret set", "Save a Secret in the Secret store."],
         ["secret delete", "Delete a Secret from the Secret store."],

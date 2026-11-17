@@ -5,6 +5,7 @@ __lazy_modules__ = {
     "aa_cli.commands",
     "aa_cli.crash",
     "aa_cli.init",
+    "aa_cli.prune",
     "aa_cli.redact",
     "aa_cli.secret",
     "aa_settings",
@@ -49,6 +50,9 @@ from aa_cli.output import (
     VerboseFlag,
     configure_logging,
 )
+from aa_cli.prune import Action as PruneAction
+from aa_cli.prune import PruneError, format_outcomes
+from aa_cli.prune import prune as prune_branches
 from aa_cli.redact import (
     FileError,
     UnknownKind,
@@ -443,6 +447,41 @@ def redact(
         raise typer.Exit(ExitCode.PROBLEMS) from exc
 
 
+@app.command()
+def prune(
+    ctx: typer.Context,
+    branches: Annotated[
+        list[str] | None,
+        typer.Argument(
+            metavar="BRANCH",
+            help="Only consider these local branches. Default: every local branch.",
+            show_default=False,
+        ),
+    ] = None,
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="Show what would be removed, without changing anything."),
+    ] = False,
+    json_output: JsonFlag = False,
+    verbose: VerboseFlag = False,
+) -> None:
+    """Remove Finished branches and their worktrees."""
+    out: Output = ctx.obj
+    names = branches or []
+    try:
+        outcomes = prune_branches(Path.cwd(), names, dry_run=dry_run)
+    except PruneError as exc:
+        out.failure(exc.code, str(exc), fix=exc.fix)
+        raise typer.Exit(ExitCode.PROBLEMS) from exc
+    data = {"dry_run": dry_run, "branches": [outcome.as_json() for outcome in outcomes]}
+    out.success(data, human=format_outcomes(outcomes))
+    failed = any(outcome.action is PruneAction.FAILED for outcome in outcomes)
+    # A named branch that is kept didn't go, though the user asked for it to.
+    named_kept = bool(names) and any(outcome.action is PruneAction.KEEP for outcome in outcomes)
+    if failed or named_kept:
+        raise typer.Exit(ExitCode.PROBLEMS)
+
+
 secret_app = typer.Typer(no_args_is_help=True)
 app.add_typer(secret_app, name="secret")
 
@@ -587,6 +626,7 @@ def secret_delete(
 COMMAND_EFFECTS: dict[str, Effect] = {
     "add": Effect.WRITE,
     "init": Effect.WRITE,
+    "prune": Effect.WRITE,
     "redact": Effect.READ,
     "commands": Effect.READ,
     "secret set": Effect.WRITE,

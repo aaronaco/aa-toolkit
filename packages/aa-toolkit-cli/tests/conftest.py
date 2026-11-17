@@ -12,6 +12,7 @@ import tomllib
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import pytest
 from typer.testing import CliRunner
@@ -23,6 +24,7 @@ PACKAGE_DIR = Path(__file__).resolve().parents[1]
 FAKE_GH = r"""
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -53,6 +55,85 @@ if sys.argv[1:3] == ["repo", "create"]:
     sys.exit(0)
 if sys.argv[1:] == ["repo", "view", "--json", "url", "--jq", ".url"]:
     print(f"https://github.com/test-user/{Path.cwd().name}")
+    sys.exit(0)
+if sys.argv[1:] == ["auth", "status", "--hostname", "github.com"]:
+    if not state["signed_in"]:
+        print("You are not logged into any GitHub hosts. To log in, run: gh auth login",
+              file=sys.stderr)
+        sys.exit(1)
+    print("github.com\n  Logged in to github.com account test-user")
+    sys.exit(0)
+if sys.argv[1:] == ["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"]:
+    # Like gh: the repo comes from a git remote that points at github.com.
+    remotes = subprocess.run([git, "remote", "-v"], capture_output=True, text=True).stdout
+    found = re.search(r"github\.com[:/]([^/\s]+)/([^/\s]+?)(?:\.git)?\s", remotes)
+    if not found:
+        print("none of the git remotes configured for this repository point to a known GitHub"
+              " host. To tell gh about a new GitHub host, please use `gh auth login`",
+              file=sys.stderr)
+        sys.exit(1)
+    print(f"{found.group(1)}/{found.group(2)}")
+    sys.exit(0)
+if sys.argv[1:] == ["api", "graphql", "--input", "-"]:
+    # Answers like GitHub from the canned pull requests, within each connection's first/last
+    # limit. A commit GitHub has is linked to the merged pull requests that hold it or whose
+    # squash commit it is, and, only while it isn't on the default branch, to the open ones
+    # that hold it.
+    body = json.load(sys.stdin)
+    with (here / "gh-graphql.jsonl").open("a") as requests:
+        requests.write(json.dumps(body) + "\n")
+    if state["graphql_fails"]:
+        print("error connecting to api.github.com", file=sys.stderr)
+        sys.exit(1)
+    for args in state["during_graphql"]:  # another program changing the repo meanwhile
+        subprocess.run([git, *args], check=True, capture_output=True)
+    query, variables = body["query"], body["variables"]
+    prs = state["pull_requests"]
+    on_github = {oid for pr in prs for oid in [*pr["commits"], pr["merge_commit"]] if oid}
+
+    def on_default_branch(oid):
+        is_ancestor = [git, "merge-base", "--is-ancestor", oid, "main"]
+        return subprocess.run(is_ancestor, capture_output=True).returncode == 0
+
+    def node(pr):
+        commits = [{"commit": {"oid": oid}} for oid in pr["commits"][-100:]]
+        return {
+            "number": pr["number"],
+            "state": pr["state"],
+            "headRefName": pr["head"],
+            "commits": {"totalCount": len(pr["commits"]), "nodes": commits},
+        }
+
+    repository = {}
+    if "defaultBranchRef { name }" in query:
+        repository["defaultBranchRef"] = {"name": "main"}
+    pattern = (
+        r"(\w+): object\(oid: \$(\w+)\) \{ \.\.\. on Commit \{"
+        r" associatedPullRequests\(first: (\d+)\)"
+    )
+    for alias, var, first in re.findall(pattern, query):
+        oid = variables[var]
+        linked = [
+            pr for pr in prs
+            if (pr["state"] == "MERGED" and (oid in pr["commits"] or oid == pr["merge_commit"]))
+            or (pr["state"] == "OPEN" and oid in pr["commits"] and not on_default_branch(oid))
+        ]
+        repository[alias] = (
+            {"associatedPullRequests": {"nodes": [node(pr) for pr in linked[: int(first)]]}}
+            if oid in on_github else None
+        )
+    pattern = r"(\w+): pullRequests\(headRefName: \$(\w+), states: \[([A-Z, ]+)\], last: (\d+)\)"
+    for alias, var, states, last in re.findall(pattern, query):
+        wanted = {s.strip() for s in states.split(",")}
+        named = [pr for pr in prs if pr["head"] == variables[var] and pr["state"] in wanted]
+        repository[alias] = {"nodes": [node(pr) for pr in named[-int(last):]]}
+    for alias, first in re.findall(r"(\w+): pullRequests\(states: \[OPEN\], first: (\d+)\)", query):
+        open_prs = [pr for pr in prs if pr["state"] == "OPEN"]
+        repository[alias] = {
+            "totalCount": len(open_prs),
+            "nodes": [node(pr) for pr in open_prs[: int(first)]],
+        }
+    print(json.dumps({"data": {"repository": repository}}))
     sys.exit(0)
 print(f"fake gh: unsupported arguments {sys.argv[1:]}", file=sys.stderr)
 sys.exit(2)
@@ -191,6 +272,7 @@ class Machine:
         repo_create_fails: bool = False,
         push_fails: bool = False,
         prints_url: bool = True,
+        graphql_fails: bool = False,
     ) -> None:
         """Put a fake gh on PATH, signed in or signed out, that records every call.
 
@@ -198,17 +280,46 @@ class Machine:
         prints its URL. Signed out or with ``repo_create_fails`` it fails before
         that, ``push_fails`` makes it fail after adding the remote, and
         ``prints_url=False`` makes it print nothing (``gh repo view`` still
-        gives the URL).
+        gives the URL). ``graphql_fails`` makes every GraphQL request fail as if offline.
         """
         state = {
             "signed_in": signed_in,
             "repo_create_fails": repo_create_fails,
             "push_fails": push_fails,
             "prints_url": prints_url,
+            "graphql_fails": graphql_fails,
+            "pull_requests": [],
+            "during_graphql": [],
         }
         (self.bin / "fake_gh.py").write_text(FAKE_GH)
         (self.bin / "gh-state.json").write_text(json.dumps(state))
         self._write_shim("gh", [sys.executable, str(self.bin / "fake_gh.py")])
+
+    def set_pull_requests(self, pull_requests: list[dict[str, Any]]) -> None:
+        """Give the fake gh the pull requests GitHub knows about.
+
+        Each has ``number``, ``state`` (OPEN, MERGED or CLOSED), ``head`` (its branch name),
+        ``commits`` (its own commits, oldest first) and ``merge_commit`` (the squash commit on
+        the default branch, or None).
+        """
+        path = self.bin / "gh-state.json"
+        state = json.loads(path.read_text())
+        state["pull_requests"] = pull_requests
+        path.write_text(json.dumps(state))
+
+    def change_repo_during_graphql(self, *commands: list[str]) -> None:
+        """Run these git commands, as another program would, while gh asks GitHub."""
+        path = self.bin / "gh-state.json"
+        state = json.loads(path.read_text())
+        state["during_graphql"] = [list(command) for command in commands]
+        path.write_text(json.dumps(state))
+
+    def graphql_requests(self) -> list[dict[str, Any]]:
+        """The body of every GraphQL request the fake gh got, in order."""
+        log = self.bin / "gh-graphql.jsonl"
+        if not log.exists():
+            return []
+        return [json.loads(line) for line in log.read_text().splitlines()]
 
     def gh_calls(self) -> list[GhCall]:
         """Every call the fake gh got, in order."""
