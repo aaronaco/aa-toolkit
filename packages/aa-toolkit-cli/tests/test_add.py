@@ -106,7 +106,7 @@ def test_add_ci_writes_the_workflow_template_with_every_action_pinned_to_a_commi
     uses = _USES.findall(workflow)
     assert uses
     for action, comment in uses:
-        assert re.fullmatch(r"[\w.-]+/[\w.-]+@[0-9a-f]{40}", action), action
+        assert re.fullmatch(r"[\w.-]+/[\w.-]+(?:/[\w./-]+)?@[0-9a-f]{40}", action), action
         assert re.fullmatch(r" # v\d+\.\d+\.\d+", comment), (action, comment)
     assert checkout_inputs(workflow) == {"persist-credentials": "false"}
 
@@ -149,6 +149,7 @@ def test_zizmor_finds_nothing_in_the_workflow_add_ci_writes(aa_in, machine, tmp_
         capture_output=True,
         text=True,
         encoding="utf-8",
+        check=False,  # the exit code is asserted below, with zizmor's output
     )
 
     assert audit.returncode == 0, audit.stdout + audit.stderr
