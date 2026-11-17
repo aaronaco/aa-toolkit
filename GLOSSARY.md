@@ -65,8 +65,12 @@ A Python repo with a `pyproject.toml` at its root, whether `aa init` made it or 
 _Avoid_: repo (when you mean a project), workspace
 
 **Piece**:
-One self-contained thing `aa add` puts into a project, such as the log setup or the CI workflow.
+One self-contained thing `aa add` puts into a project, such as the log setup or CI.
 _Avoid_: feature, add-on, extra, plugin, module
+
+**Check**:
+One part of the CI piece that can be set up on its own, in a file of its own, such as the tests, the workflow audit or Dependabot updates.
+_Avoid_: job, workflow, option, pick
 
 **Output contract**:
 The promise every `aa` command keeps to whoever runs it, whether a person, a script or an agent: one machine-readable answer when asked for one, logs kept apart from that answer, the same exit codes everywhere, and never waiting for input no one can give.
