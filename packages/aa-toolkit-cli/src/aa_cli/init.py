@@ -32,8 +32,6 @@ COMMIT_MESSAGE = "chore: initial commit"
 BRANCH = "main"
 PYPROJECT = "pyproject.toml"
 WRITE_FILES_STEP = "write files"
-CI_WORKFLOW = ".github/workflows/ci.yml"
-CI_TEMPLATE = "ci.yml.tmpl"
 
 NAME_RULE = (
     "a project name starts with a letter, ends with a letter or digit, holds only"
@@ -206,7 +204,7 @@ def _local_steps(kind: Kind) -> list[StepSpec]:
             ("uv", "add", "--python", PYTHON_VERSION, "--dev", "ruff", "pytest"),
         ),
         # The folder holds only what aa just made, so global ignore rules have nothing to protect.
-        # One like *.lock would drop a file the project's CI needs, and git add wouldn't say so.
+        # One like *.lock would drop a file the project needs, and git add wouldn't say so.
         StepSpec("stage files", ("git", "-c", "core.excludesFile=", "add", "--all")),
     ]
 
@@ -349,7 +347,6 @@ def _render_outputs(
         "CLAUDE.md": "CLAUDE.md.tmpl",
         "README.md": "README.md.tmpl",
         ".gitignore": "gitignore.tmpl",
-        CI_WORKFLOW: CI_TEMPLATE,
     }
     if license_choice is License.MIT:
         templates["LICENSE"] = "LICENSE.tmpl"

@@ -13,8 +13,6 @@ from typing import Any
 
 from aa_cli.choices import Piece
 from aa_cli.init import (
-    CI_TEMPLATE,
-    CI_WORKFLOW,
     PYPROJECT,
     WRITE_FILES_STEP,
     file_step,
@@ -24,6 +22,8 @@ from aa_cli.init import (
 )
 
 UV_LOCK = "uv.lock"
+CI_WORKFLOW = ".github/workflows/ci.yml"
+CI_TEMPLATE = "ci.yml.tmpl"
 NOT_A_PROJECT_FIX = "Run aa add from the project's root folder (where pyproject.toml is)."
 _CI_TOOLS = ("ruff", "pytest")
 LOG_PACKAGE = "aa-toolkit-log"

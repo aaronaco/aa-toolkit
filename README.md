@@ -35,7 +35,7 @@ aa --version
 
 ## Commands
 
-`aa init <name>` creates a project in the folder `<name>`, which must be new or empty. It runs `uv init` (a CLI by default, a typed library with `--lib`), pins Python 3.15, adds ruff and pytest, and writes a starter test, AGENTS.md, CLAUDE.md, an MIT LICENSE (`--license none` skips it), a README, a .gitignore and a CI workflow for Windows and Linux. It stages every file on `main` and stops there, so you make the first commit: `aa init` commits only with `--github`. It leaves no aa config in the project.
+`aa init <name>` creates a project in the folder `<name>`, which must be new or empty. It runs `uv init` (a CLI by default, a typed library with `--lib`), pins Python 3.15, adds ruff and pytest, and writes a starter test, AGENTS.md, CLAUDE.md, an MIT LICENSE (`--license none` skips it), a README and a .gitignore. It stages every file on `main` and stops there, so you make the first commit: `aa init` commits only with `--github`. It leaves no aa config in the project. It writes no CI; run `aa add ci` to set it up.
 
 `aa init` assumes uv and git are installed, and doesn't look for them first. A missing tool is reported as `unexpected`, and the message names it. A missing git name fails with `step_failed` when the project gets a LICENSE, because the name goes in it. When `aa init` fails partway, the folder stays as it is, and the message tells you to delete it before running `aa init` again.
 

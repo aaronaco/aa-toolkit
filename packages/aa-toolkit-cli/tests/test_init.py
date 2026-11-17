@@ -3,7 +3,6 @@
 import datetime
 import json
 import os
-import re
 import subprocess
 import tomllib
 from dataclasses import dataclass
@@ -15,7 +14,6 @@ from typer.testing import Result
 
 COMMIT_MESSAGE = "chore: initial commit"
 EXPECTED_FILES = {
-    ".github/workflows/ci.yml",
     ".gitignore",
     ".python-version",
     "AGENTS.md",
@@ -143,6 +141,26 @@ def test_the_created_project_has_the_standard_files(cli_project):
         assert pattern in gitignore, pattern
 
 
+def test_agents_md_says_to_run_lint_format_and_tests_before_committing_but_not_that_ci_does(
+    cli_project,
+):
+    agents = cli_project.read("AGENTS.md")
+
+    before_committing = (
+        "Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest`"
+        " before you commit."
+    )
+    assert before_committing in agents
+    assert "CI" not in agents
+
+
+def test_init_writes_no_ci_workflow(cli_project):
+    assert not (cli_project.project / ".github").exists()
+    assert not any(path.startswith(".github/") for path in cli_project.envelope["data"]["files"])
+    staged = cli_project.git("diff", "--cached", "--name-only").splitlines()
+    assert not any(path.startswith(".github/") for path in staged)
+
+
 def test_the_license_is_mit_with_the_git_name_and_current_year(cli_project):
     license_text = cli_project.read("LICENSE")
 
@@ -179,25 +197,6 @@ def test_the_readme_has_the_name_and_the_install_test_and_lint_commands(cli_proj
     assert readme.startswith("# demo")
     for command in ("uv sync", "uv run pytest", "uv run ruff check"):
         assert command in readme, command
-
-
-def test_the_ci_workflow_runs_lint_and_tests_on_windows_and_linux(cli_project):
-    workflow = cli_project.read(".github/workflows/ci.yml")
-
-    assert "push:\n    branches: [main]" in workflow
-    assert "pull_request:" in workflow
-    assert "os: [ubuntu-latest, windows-latest]" in workflow
-    assert re.search(r"astral-sh/setup-uv@[0-9a-f]{40} # v10\.", workflow)
-    assert re.search(r"actions/checkout@[0-9a-f]{40} # v\d+\.", workflow)
-    assert re.search(r'version: "\d+\.\d+\.\d+"', workflow)
-    steps = [line.strip() for line in workflow.splitlines() if line.strip().startswith("- run:")]
-    assert steps == [
-        "- run: uv python install",
-        "- run: uv sync --locked",
-        "- run: uv run ruff check .",
-        "- run: uv run ruff format --check .",
-        "- run: uv run pytest",
-    ]
 
 
 def test_init_stages_every_file_on_main_and_makes_no_commit(cli_project):
@@ -688,6 +687,9 @@ def test_init_github_pushes_one_initial_commit_on_main_with_a_clean_tree(github_
     assert created.git("log", "--format=%s").splitlines() == [COMMIT_MESSAGE]
     assert created.git("branch", "--show-current").strip() == "main"
     assert created.git("status", "--porcelain") == ""
+    committed = created.git("ls-tree", "-r", "--name-only", "HEAD").splitlines()
+    assert set(committed) == EXPECTED_FILES
+    assert not any(path.startswith(".github/") for path in committed)
 
 
 def test_init_github_commits_files_the_developers_own_git_ignore_rules_would_drop(
@@ -828,6 +830,7 @@ def test_dry_run_creates_nothing_runs_no_commands_and_reports_plan(aa_in, machin
     assert Path(data["path"]) == (tmp_path / "my-app").resolve()
     assert data["kind"] == "cli"
     assert data["github_url"] is None
+    assert not any(path.startswith(".github/") for path in data["files"])
     assert data["steps"] == [
         {"step": "git init", "command": ["git", "init", "--quiet", "--initial-branch=main"]},
         {
