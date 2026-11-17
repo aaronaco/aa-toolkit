@@ -59,6 +59,35 @@ aa init my-app --github
 aa init my-app --dry-run
 ```
 
+`aa add <piece>` sets up one Piece in the Project in the current folder, which must have a `pyproject.toml`. It changes the Project in only two ways: through uv, which updates `pyproject.toml` and `uv.lock`, and by writing files that aren't there yet ([ADR 0006](docs/adr/0006-aa-add-never-edits-project-code.md)). It never stages or commits anything. Anything else the Piece needs is printed as next steps. With `--json`, `data` holds `piece`, `files` (every file it changed or wrote) and `next_steps`.
+
+`aa add ci` sets up four CI parts, each in a file of its own ([ADR 0008](docs/adr/0008-one-file-per-ci-part.md)):
+
+| CI part | File | What it does |
+|---|---|---|
+| `tests` | `.github/workflows/ci.yml` | ruff and pytest on Windows and Linux |
+| `zizmor` | `.github/workflows/zizmor.yml` | audits the Project's workflows; findings show as annotations and fail the job |
+| `audit` | `.github/workflows/uv-audit.yml` | `uv audit --locked`: fails when a package in `uv.lock` has a known vulnerability |
+| `dependabot` | `.github/dependabot.yml` | updates GitHub Actions only: monthly, in one grouped pull request, after a 7-day cooldown |
+
+The zizmor and audit workflows run on pull requests, on pushes to `main` and every week. Every action is pinned to a full commit SHA, and the `dependabot` CI part keeps those pins current ([ADR 0009](docs/adr/0009-projects-pin-actions-by-commit.md)). Python packages stay out of Dependabot, because its uv updates raise the lower bounds in `pyproject.toml`. The CI parts work on public repos with no GitHub setup.
+
+Plain `aa add ci` sets up all four. `--only PART` sets up just the CI parts it names, case-insensitively, with commas or repetition. Only `tests` runs uv: `uv add --dev` for ruff and pytest when they're missing, or `uv lock` when there's no lockfile. A CI part whose file is already there with the same content is skipped, and when every chosen CI part is there, aa says so and exits `0`. When a chosen CI part's file is there with different content, aa writes nothing and fails with `file_exists`, and the fix is the `aa add ci --only` command for the chosen CI parts that don't clash. A Project made before `aa init` stopped writing CI has an older `ci.yml`, so plain `aa add ci` stops there, and the fix is `aa add ci --only zizmor,audit,dependabot`. An unknown CI part is a usage error that lists the four.
+
+```bash
+aa add ci
+```
+
+```bash
+aa add ci --only zizmor,audit
+```
+
+`aa add log` adds the [log library](packages/aa-toolkit-log/README.md) as a dependency with `uv add`, pinned to a release tag. It doesn't touch your code or `.gitignore`: the next steps tell you where to call `configure_logging()` (only apps call it; a library skips it) and which `*.log` lines `.gitignore` is missing. `--only` is a usage error here.
+
+```bash
+aa add log
+```
+
 `aa redact [FILE]` prints a cleaned copy of a file, or of piped text when no file is given, using a `Redactor` from the [redaction library](packages/aa-toolkit-redact/README.md) with its defaults. Every sensitive value is replaced by a Placeholder such as `[EMAIL]`, and a value under a Sensitive name becomes `[REDACTED]`. The original file is never changed; redirect the output to save the cleaned copy. Each line is cleaned with its line ending and flushed as it arrives, and a private key that spans several lines is held back until its end line so its middle lines never slip out.
 
 `--with KIND` turns on the built-in Detectors that are off by default (`IP_ADDRESS`, `PHONE`). `--without KIND` turns off built-in Detectors that are on by default (`AWS_ACCESS_KEY`, `GITHUB_TOKEN`, `API_KEY`, `SLACK_TOKEN`, `JWT`, `BEARER_TOKEN`, `PRIVATE_KEY`, `URL_PASSWORD`, `EMAIL`, `CARD`). Both flags are case-insensitive and accept commas or repetition. Patterns alone cannot find names, street addresses, or secrets with no recognizable prefix, so redaction lowers risk and does not guarantee safety ([ADR 0004](docs/adr/0004-redaction-library-without-dependencies.md)): still read what you share.
@@ -224,7 +253,7 @@ On `main`, this reports `no-commit-to-branch` as failed, because commits there a
 
 ### Workflow audit
 
-[zizmor](https://docs.zizmor.sh/) audits the GitHub Actions workflows, the workflow templates in `packages/aa-toolkit-cli/src/aa_cli/templates/workflows` and the Dependabot config. The `zizmor` hook runs it offline, and a finding stops a commit and a merge. The `zizmor` workflow also runs the online audits and sends results to the Security tab, but its findings don't block merges.
+[zizmor](https://docs.zizmor.sh/) audits the GitHub Actions workflows, the CI templates in `packages/aa-toolkit-cli/src/aa_cli/templates` (the workflow templates in its `workflows` folder and `dependabot.yml`) and the Dependabot config. The `zizmor` hook runs it offline, and a finding stops a commit and a merge. The `zizmor` workflow also runs the online audits and sends results to the Security tab, but its findings don't block merges.
 
 `uv.lock` pins the zizmor that the hook uses. Upgrade it by hand with `uv lock --upgrade-package zizmor`. The workflow uses the zizmor that the action pins, and Dependabot upgrades the action.
 
