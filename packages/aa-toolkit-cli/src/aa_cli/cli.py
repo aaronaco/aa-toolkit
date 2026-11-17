@@ -28,7 +28,16 @@ import typer
 from typer.core import TyperGroup
 
 from aa_cli.add import AddError, add_piece
-from aa_cli.choices import WITH_KINDS, WITHOUT_KINDS, Effect, License, Piece
+from aa_cli.choices import (
+    WITH_KINDS,
+    WITHOUT_KINDS,
+    CiPart,
+    Effect,
+    License,
+    Piece,
+    UnknownChoice,
+    parse_choices,
+)
 from aa_cli.commands import describe_cli, format_commands
 from aa_cli.crash import REDACTION_FAILED, crash_folder, save_report
 from aa_cli.init import (
@@ -264,14 +273,23 @@ def add(
         Piece,
         typer.Argument(help=f"The piece to add ({', '.join(Piece)})."),
     ],
+    only: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--only",
+            metavar="PART",
+            help=f"For ci, set up only these CI parts: {', '.join(CiPart)}. Default: all of them.",
+        ),
+    ] = None,
     json_output: JsonFlag = False,
     verbose: VerboseFlag = False,
 ) -> None:
     """Add a piece to the project in the current folder."""
     out: Output = ctx.obj
+    ci_parts = _ci_parts(ctx, piece, only)
     target = Path.cwd().resolve()
     try:
-        added = add_piece(target, piece)
+        added = add_piece(target, piece, ci_parts)
     except AddError as exc:
         out.failure(exc.code, str(exc), fix=exc.fix)
         raise typer.Exit(ExitCode.PROBLEMS) from exc
@@ -286,6 +304,19 @@ def add(
     if added.next_steps:
         lines.extend(["", "Next steps:", *(f"  {item}" for item in added.next_steps)])
     out.success(data, human="\n".join(lines))
+
+
+def _ci_parts(ctx: typer.Context, piece: Piece, only: list[str] | None) -> list[CiPart]:
+    """The CI parts ``--only`` names, or all of them; a usage error for any other piece."""
+    if only is None:
+        return list(CiPart)
+    if piece is not Piece.CI:
+        raise typer.BadParameter("only works with 'ci'", ctx=ctx, param_hint="'--only'")
+    try:
+        return [CiPart(name) for name in parse_choices(only, tuple(CiPart))]
+    except UnknownChoice as exc:
+        message = f"unknown CI part {exc.name!r}; choose from: {', '.join(exc.allowed)}"
+        raise typer.BadParameter(message, ctx=ctx, param_hint="'--only'") from None
 
 
 @app.command()

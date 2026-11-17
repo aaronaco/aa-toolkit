@@ -1,0 +1,13 @@
+# Python packages aren't listed: Dependabot's uv updates raise the lower bounds in
+# pyproject.toml. Update them with uv instead.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+    groups:
+      github-actions:
+        patterns: ["*"]

@@ -69,7 +69,18 @@
             ]
           }
         ],
-        "options": []
+        "options": [
+          {
+            "flag": "--only",
+            "type": "array",
+            "items": "string",
+            "default": null,
+            "choices": null,
+            "required": false,
+            "repeatable": true,
+            "help": "For ci, set up only these CI parts: tests, zizmor, audit, dependabot. Default: all of them."
+          }
+        ]
       },
       {
         "name": "init",

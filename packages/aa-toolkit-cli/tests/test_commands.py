@@ -76,7 +76,7 @@ def _option_by_flag(cmd: dict[str, Any], flag: str) -> dict[str, Any]:
     return by_flag[flag]
 
 
-def test_add_entry_describes_piece_argument_choices_and_write_effect(aa) -> None:
+def test_add_entry_describes_piece_argument_choices_only_and_write_effect(aa) -> None:
     result = aa("commands", "--json")
 
     assert result.exit_code == 0, result.output
@@ -89,7 +89,15 @@ def test_add_entry_describes_piece_argument_choices_and_write_effect(aa) -> None
     assert piece_arg["choices"] == ["ci", "log"]
     assert piece_arg["required"] is True
     assert piece_arg["help"]
-    assert add_cmd["options"] == []
+    [only_opt] = add_cmd["options"]
+    assert only_opt["flag"] == "--only"
+    assert only_opt["type"] == "array"
+    assert only_opt["items"] == "string"
+    assert only_opt["default"] is None
+    assert only_opt["required"] is False
+    assert only_opt["repeatable"] is True
+    for part in ("tests", "zizmor", "audit", "dependabot"):
+        assert part in only_opt["help"]
 
 
 def test_init_entry_describes_name_argument_options_and_write_effect(aa) -> None:
