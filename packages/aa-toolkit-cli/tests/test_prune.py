@@ -260,8 +260,11 @@ def mixed(new_machine, tmp_path_factory) -> MixedRepo:
 
 
 @pytest.fixture(scope="module")
-def mixed_dry_run(mixed, aa_in):
-    return aa_in(mixed.repo.root, "prune", "--dry-run", env=mixed.machine.env)
+def mixed_dry_run(mixed, aa_in, tmp_path_factory):
+    # Module fixtures run before the autouse one that moves LOCALAPPDATA, so move it here too:
+    # a crash in this run must not write a Crash report into the real one.
+    env = {**mixed.machine.env, "LOCALAPPDATA": str(tmp_path_factory.mktemp("localappdata"))}
+    return aa_in(mixed.repo.root, "prune", "--dry-run", env=env)
 
 
 @pytest.mark.parametrize(
@@ -745,3 +748,75 @@ def test_a_branch_another_run_removed_meanwhile_counts_as_removed(aa_in, machine
         "ticket-65",
         "already removed by another program",
     ]
+
+
+def test_a_branch_a_rebase_is_stopped_on_is_kept(aa_in, machine, tmp_path):
+    machine = prune_machine(machine)
+    repo = Repo(tmp_path, machine)
+    folder, pr = finished_worktree(repo, "ticket-64", 64)
+    machine.set_pull_requests([pr])
+    # The rebase stops after replaying the commit and leaves the worktree detached.
+    stopped = subprocess.run(
+        ["git", "rebase", "--exec", "exit 1", "HEAD~1"],
+        cwd=folder,
+        env=repo._env,
+        capture_output=True,
+        text=True,
+    )
+    assert stopped.returncode != 0
+    assert repo.git("branch", "--show-current", cwd=folder) == ""
+
+    result = aa_in(repo.root, "prune", env=machine.env)
+
+    assert result.exit_code == 0, result.output
+    assert lines_by_branch(result.stdout)["ticket-64"] == [
+        "keep",
+        "ticket-64",
+        f"a rebase or bisect in {folder} uses it",
+    ]
+    assert "ticket-64" in repo.branches()
+    assert folder.is_dir()
+
+
+def test_a_branch_checked_out_while_gh_asks_github_is_kept(aa_in, machine, tmp_path):
+    machine = prune_machine(machine)
+    repo = Repo(tmp_path, machine)
+    machine.set_pull_requests([finished_branch(repo, "ticket-65", 65)])
+    other = repo.parent / "wt-other"
+    repo.git("worktree", "add", "--quiet", "--detach", str(other), "main")
+    machine.change_repo_during_graphql(["-C", str(other), "switch", "--quiet", "ticket-65"])
+
+    result = aa_in(repo.root, "prune", env=machine.env)
+
+    assert result.exit_code == 0, result.output
+    assert lines_by_branch(result.stdout)["ticket-65"] == [
+        "keep",
+        "ticket-65",
+        f"checked out in {other} while aa ran",
+    ]
+    assert "ticket-65" in repo.branches()
+
+
+def test_a_clean_worktree_with_a_submodule_is_kept_because_git_wont_remove_it(
+    aa_in, machine, tmp_path
+):
+    machine = prune_machine(machine)
+    library = tmp_path / "library"
+    library.mkdir()
+    lib = Repo(library, machine)
+    repo = Repo(tmp_path, machine)
+    folder = repo.worktree("ticket-64")
+    add_submodule = ["-c", "protocol.file.allow=always", "submodule", "add", "--quiet"]
+    repo.git(*add_submodule, str(lib.root), "lib", cwd=folder)
+    tip = repo.commit("feat: add the library", cwd=folder)
+    machine.set_pull_requests([pull_request(64, "ticket-64", [tip], repo.commit("feat (#64)"))])
+
+    result = aa_in(repo.root, "prune", env=machine.env)
+
+    assert result.exit_code == 0, result.output
+    assert lines_by_branch(result.stdout)["ticket-64"] == [
+        "keep",
+        "ticket-64",
+        "worktree has submodules, which git worktree remove won't remove",
+    ]
+    assert folder.is_dir()

@@ -92,6 +92,10 @@ class _Worktree:
     branch: str | None  # None when detached
     locked: bool
     main: bool
+    rebasing: str | None = None  # the branch a rebase or bisect here works on, while detached
+
+    def uses(self, name: str) -> bool:
+        return name in (self.branch, self.rebasing)
 
 
 class _PullRequestState(StrEnum):
@@ -190,15 +194,34 @@ def _worktrees(top: Path) -> list[_Worktree]:
         if "bare" in fields:
             continue
         branch = fields.get("branch")
+        path = Path(fields["worktree"])
         trees.append(
             _Worktree(
-                path=Path(fields["worktree"]),
+                path=path,
                 branch=branch.removeprefix(HEADS) if branch else None,
                 locked="locked" in fields,
                 main=index == 0,
+                rebasing=None if branch else _rebasing(path),
             )
         )
     return trees
+
+
+def _rebasing(folder: Path) -> str | None:
+    """The branch a rebase or bisect in a detached worktree works on, as git branch -D sees it."""
+    if not folder.is_dir():
+        return None
+    git_dir = Path(_git(folder, "rev-parse", "--absolute-git-dir").strip())
+    for state in ("rebase-merge/head-name", "rebase-apply/head-name"):
+        head = git_dir / state
+        if head.is_file():
+            name = head.read_text(encoding="utf-8").strip()
+            if name.startswith(HEADS):
+                return name.removeprefix(HEADS)
+    bisect = git_dir / "BISECT_START"
+    if bisect.is_file():
+        return bisect.read_text(encoding="utf-8").strip() or None
+    return None
 
 
 def _local_branches(top: Path) -> dict[str, _Branch]:
@@ -319,39 +342,50 @@ def _pull_requests(connection: dict[str, Any] | None) -> list[_PullRequest]:
 
 def _decide(branch: _Branch, worktrees: list[_Worktree], top: Path, github: _GitHub) -> Outcome:
     """Whether ``branch`` is a Finished branch that can go with nothing lost, and why."""
-    trees = [tree for tree in worktrees if tree.branch == branch.name]
+    trees = [tree for tree in worktrees if tree.uses(branch.name)]
     number, github_reason = _github_verdict(branch, github)
     path = trees[0].path if len(trees) == 1 else None
 
     def keep(reason: str) -> Outcome:
         return Outcome(branch.name, Action.KEEP, reason, number, path)
 
-    if len(trees) > 1:
-        return keep("checked out in more than one worktree")
-    tree = trees[0] if trees else None
-    if tree is not None:
-        if _same_folder(tree.path, top):
-            return keep("the folder aa runs from")
-        if tree.main:
-            return keep("checked out in the main folder")
-        if not tree.path.is_dir():
-            return keep("worktree folder is missing (git worktree prune clears it)")
-        if tree.locked:
-            return keep("worktree is locked")
+    location = _location_reason(branch, trees, top)
+    if location is not None:
+        return keep(location)
     if branch.name == github.default_branch:
         return keep("the repo's default branch")
     if github_reason is not None:
         return keep(github_reason)
-    if tree is None:
+    if path is None:
         return Outcome(
             branch.name, Action.WOULD_REMOVE, f"PR #{number} merged, no worktree", number, None
         )
-    dirty = _dirty_reason(tree.path)
-    if dirty is not None:
-        return keep(dirty)
+    blocker = _dirty_reason(path) or _submodule_reason(path)
+    if blocker is not None:
+        return keep(blocker)
     return Outcome(
         branch.name, Action.WOULD_REMOVE, f"PR #{number} merged, worktree clean", number, path
     )
+
+
+def _location_reason(branch: _Branch, trees: list[_Worktree], top: Path) -> str | None:
+    """Why where the branch is checked out keeps it, or None."""
+    if len(trees) > 1:
+        return "checked out in more than one worktree"
+    if not trees:
+        return None
+    tree = trees[0]
+    if tree.rebasing == branch.name:
+        return f"a rebase or bisect in {tree.path} uses it"
+    if _same_folder(tree.path, top):
+        return "the folder aa runs from"
+    if tree.main:
+        return "checked out in the main folder"
+    if not tree.path.is_dir():
+        return "worktree folder is missing (git worktree prune clears it)"
+    if tree.locked:
+        return "worktree is locked"
+    return None
 
 
 def _github_verdict(branch: _Branch, github: _GitHub) -> tuple[int | None, str | None]:
@@ -406,6 +440,18 @@ def _dirty_reason(folder: Path) -> str | None:
     return None
 
 
+def _submodule_reason(folder: Path) -> str | None:
+    # git worktree remove refuses a worktree with a submodule checked out, even a clean one,
+    # and only --force gets past that, which would also remove uncommitted work.
+    # A submodule is a gitlink (mode 160000) in the index; it's checked out when its folder
+    # holds a .git, the same test git worktree remove makes.
+    staged = _git(folder, "ls-files", "--stage", "-z").split("\0")
+    gitlinks = [entry.partition("\t")[2] for entry in staged if entry.startswith("160000 ")]
+    if any((folder / gitlink / ".git").exists() for gitlink in gitlinks):
+        return "worktree has submodules, which git worktree remove won't remove"
+    return None
+
+
 def _remove(top: Path, branch: _Branch, outcome: Outcome) -> Outcome:
     """Remove the worktree, then the branch, unless either changed since it was checked."""
     now = run("git", "rev-parse", "--verify", "--quiet", branch.ref, cwd=top).stdout.strip()
@@ -413,16 +459,10 @@ def _remove(top: Path, branch: _Branch, outcome: Outcome) -> Outcome:
         return outcome.but(Action.REMOVED, "already removed by another program")
     if now != branch.tip:
         return outcome.but(Action.KEEP, "new commits since aa checked it")
+    moved = _checkout_change(top, branch, outcome.worktree)
+    if moved is not None:
+        return outcome.but(Action.KEEP, moved)
     if outcome.worktree is not None:
-        if not outcome.worktree.is_dir():
-            return outcome.but(
-                Action.KEEP, "worktree folder is missing (git worktree prune clears it)"
-            )
-        head = run("git", "symbolic-ref", "--quiet", "HEAD", cwd=outcome.worktree)
-        if head.stdout.strip() != branch.ref:
-            return outcome.but(
-                Action.KEEP, "worktree switched to another branch since aa checked it"
-            )
         removed = run("git", "worktree", "remove", str(outcome.worktree), cwd=top)
         if removed.returncode != 0:
             return outcome.but(Action.FAILED, _removal_failure(top, outcome.worktree, removed))
@@ -433,6 +473,23 @@ def _remove(top: Path, branch: _Branch, outcome: Outcome) -> Outcome:
         return outcome.but(Action.FAILED, _tool_error(deleted))
     run("git", "config", "--remove-section", f"branch.{branch.name}", cwd=top)
     return outcome.but(Action.REMOVED)
+
+
+def _checkout_change(top: Path, branch: _Branch, recorded: Path | None) -> str | None:
+    """How the branch's checkout changed since aa decided, or None if it's where it was."""
+    try:
+        trees = [tree for tree in _worktrees(top) if tree.uses(branch.name)]
+    except PruneError as exc:
+        return str(exc).removesuffix("; nothing changed")
+    if recorded is not None:
+        if not recorded.is_dir():
+            return "worktree folder is missing (git worktree prune clears it)"
+        if not any(_same_folder(tree.path, recorded) for tree in trees):
+            return "worktree switched to another branch since aa checked it"
+    others = [tree for tree in trees if recorded is None or not _same_folder(tree.path, recorded)]
+    if others:
+        return f"checked out in {others[0].path} while aa ran"
+    return None
 
 
 def _removal_failure(top: Path, folder: Path, removed: subprocess.CompletedProcess[str]) -> str:
