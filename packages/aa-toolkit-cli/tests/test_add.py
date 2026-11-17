@@ -60,17 +60,7 @@ def test_add_ci_writes_workflow_adds_dev_tools_creates_lockfile_and_leaves_git_a
     aa_in, machine, tmp_path
 ):
     machine = uv_machine(machine)
-    init_parent = tmp_path / "init"
-    init_parent.mkdir()
-    init_result = aa_in(init_parent, "init", "expected", "--json", env=machine.env)
-    assert init_result.exit_code == 0, init_result.output
-    expected_workflow = (init_parent / "expected" / ".github/workflows/ci.yml").read_text(
-        encoding="utf-8"
-    )
-
-    project_dir = tmp_path / "project"
-    project_dir.mkdir()
-    project = make_uv_project(project_dir, machine)
+    project = make_uv_project(tmp_path, machine)
 
     result = aa_in(project, "add", "ci", "--json", env=machine.env)
 
@@ -84,13 +74,54 @@ def test_add_ci_writes_workflow_adds_dev_tools_creates_lockfile_and_leaves_git_a
             "next_steps": [],
         },
     }
-    assert (project / ".github/workflows/ci.yml").read_text(encoding="utf-8") == expected_workflow
+    assert_runs_lint_and_tests_on_windows_and_linux(
+        (project / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    )
     pyproject = tomllib.loads((project / "pyproject.toml").read_text(encoding="utf-8"))
     dev_deps = pyproject["dependency-groups"]["dev"]
     assert {"ruff", "pytest"} <= req_names(dev_deps)
     assert (project / "uv.lock").is_file()
     assert run_git(project, machine, "diff", "--cached", "--name-only") == ""
     assert run_git(project, machine, "rev-list", "--all", "--count").strip() == "0"
+
+
+def assert_runs_lint_and_tests_on_windows_and_linux(workflow: str) -> None:
+    assert "push:\n    branches: [main]" in workflow
+    assert "pull_request:" in workflow
+    assert "os: [ubuntu-latest, windows-latest]" in workflow
+    assert re.search(r"astral-sh/setup-uv@[0-9a-f]{40} # v10\.", workflow)
+    assert re.search(r"actions/checkout@[0-9a-f]{40} # v\d+\.", workflow)
+    assert re.search(r'version: "\d+\.\d+\.\d+"', workflow)
+    steps = [line.strip() for line in workflow.splitlines() if line.strip().startswith("- run:")]
+    assert steps == [
+        "- run: uv python install",
+        "- run: uv sync --locked",
+        "- run: uv run ruff check .",
+        "- run: uv run ruff format --check .",
+        "- run: uv run pytest",
+    ]
+
+
+def test_add_ci_in_a_project_aa_init_just_made_writes_only_the_workflow(aa_in, machine, tmp_path):
+    machine = uv_machine(machine)
+    init_result = aa_in(tmp_path, "init", "demo", "--json", env=machine.env)
+    assert init_result.exit_code == 0, init_result.output
+    project = tmp_path / "demo"
+    staged_before = run_git(project, machine, "diff", "--cached", "--name-only")
+    uv_files = ("pyproject.toml", "uv.lock")
+    uv_files_before = {name: (project / name).read_bytes() for name in uv_files}
+
+    # As on a machine with no Python override, so the project's .python-version decides.
+    env = {**machine.env, "UV_PYTHON": None}
+
+    result = aa_in(project, "add", "ci", "--json", env=env)
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["data"]["files"] == [".github/workflows/ci.yml"]
+    assert {name: (project / name).read_bytes() for name in uv_files} == uv_files_before
+    untracked = run_git(project, machine, "ls-files", "--others", "--exclude-standard")
+    assert untracked.splitlines() == [".github/workflows/ci.yml"]
+    assert run_git(project, machine, "diff", "--cached", "--name-only") == staged_before
 
 
 def test_add_ci_in_human_mode_lists_the_same_files(aa_in, machine, tmp_path):
