@@ -1,0 +1,5 @@
+# Tests run git, uv and zizmor by name on purpose, so the root pyproject.toml turns off
+# ruff's S603 and S607 for them. Codacy's own Bandit and Semgrep don't read that setting.
+# Codacy reads this file only from the default branch.
+exclude_paths:
+  - "packages/*/tests/**"
