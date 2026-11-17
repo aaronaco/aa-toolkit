@@ -122,6 +122,8 @@ def held_open(folder: Path) -> Generator[None]:
         return
     held.parent.chmod(stat.S_IRUSR | stat.S_IXUSR)
     try:
+        if os.access(held.parent, os.W_OK):
+            pytest.skip("this user can delete files in a folder without write permission")
         yield
     finally:
         held.parent.chmod(stat.S_IRWXU)
@@ -231,6 +233,18 @@ def mixed(new_machine, tmp_path_factory) -> MixedRepo:
 
     repo.branch_with_commit("no-pr")
 
+    # An open pull request from another branch holds the same last commit as a merged one.
+    trees["overlap"], pr = finished_worktree(repo, "overlap", 73)
+    prs.append(pr)
+    prs.append(pull_request(74, "stacked", pr["commits"], state="OPEN"))
+
+    # Merged with a merge commit, so its last commit is on main, where GitHub links it to the
+    # merged pull request only, not to the open one from another branch that also holds it.
+    tip = repo.branch_with_commit("merged-in")
+    repo.git("merge", "--quiet", "--no-ff", "--message", "Merge #75", "merged-in")
+    prs.append(pull_request(75, "merged-in", [tip], repo.git("rev-parse", "HEAD")))
+    prs.append(pull_request(76, "release-merged-in", [tip, "f" * 40], state="OPEN"))
+
     trees["missing"], pr = finished_worktree(repo, "missing", 72)
     shutil.rmtree(trees["missing"])
     prs.append(pr)
@@ -264,6 +278,8 @@ def mixed_dry_run(mixed, aa_in):
         ("no-pr", "keep", "no merged pull request"),
         ("fresh", "keep", "no merged pull request"),
         ("missing", "keep", "worktree folder is missing (git worktree prune clears it)"),
+        ("overlap", "keep", "PR #74 open"),
+        ("merged-in", "keep", "PR #76 open"),
         ("main", "keep", "the folder aa runs from"),
     ],
 )
@@ -397,7 +413,10 @@ def test_a_worktree_that_cannot_be_removed_fails_and_the_others_still_go(aa_in, 
     assert result.exit_code == 1, result.output
     by_branch = {entry["branch"]: entry for entry in json.loads(result.stdout)["data"]["branches"]}
     assert by_branch["ticket-64"]["action"] == "failed"
-    assert "failed to delete" in by_branch["ticket-64"]["reason"]
+    reason = by_branch["ticket-64"]["reason"]
+    assert "failed to delete" in reason
+    # git unregisters the worktree before it gives up, so only the folder is left to delete.
+    assert reason.endswith(f"close any program using {held} and delete that folder")
     assert by_branch["ticket-65"]["action"] == "removed"
     assert not free.exists()
     assert repo.branches() == {"main", "ticket-64"}
@@ -494,3 +513,235 @@ def test_errors_in_human_mode_show_the_message_and_fix_on_stderr(aa_in, machine,
     assert result.stdout == ""
     assert "Error: " in result.stderr
     assert "Fix: " in result.stderr
+
+
+def test_after_a_failed_removal_a_rerun_removes_the_branch(aa_in, machine, tmp_path):
+    machine = prune_machine(machine)
+    repo = Repo(tmp_path, machine)
+    held, pr = finished_worktree(repo, "ticket-64", 64)
+    machine.set_pull_requests([pr])
+    with held_open(held):
+        first = aa_in(repo.root, "prune", env=machine.env)
+    assert first.exit_code == 1, first.output
+
+    rerun = aa_in(repo.root, "prune", env=machine.env)
+
+    assert rerun.exit_code == 0, rerun.output
+    assert lines_by_branch(rerun.stdout)["ticket-64"] == [
+        "removed",
+        "ticket-64",
+        "PR #64 merged, no worktree",
+    ]
+
+
+def test_the_default_branch_is_kept_when_the_main_folder_has_another_branch(
+    aa_in, machine, tmp_path
+):
+    machine = prune_machine(machine)
+    repo = Repo(tmp_path, machine)
+    main_tip = repo.git("rev-parse", "main")
+    repo.git("switch", "--quiet", "--create", "work")
+    machine.set_pull_requests([pull_request(90, "release", [main_tip], "e" * 40)])
+
+    result = aa_in(repo.root, "prune", env=machine.env)
+
+    assert result.exit_code == 0, result.output
+    assert lines_by_branch(result.stdout)["main"] == ["keep", "main", "the repo's default branch"]
+    assert "main" in repo.branches()
+
+
+def test_a_branch_checked_out_in_two_worktrees_is_kept(aa_in, machine, tmp_path):
+    machine = prune_machine(machine)
+    repo = Repo(tmp_path, machine)
+    folder, pr = finished_worktree(repo, "ticket-64", 64)
+    second = repo.parent / "wt-second"
+    repo.git("worktree", "add", "--quiet", "--force", str(second), "ticket-64")
+    machine.set_pull_requests([pr])
+
+    result = aa_in(repo.root, "prune", env=machine.env)
+
+    assert result.exit_code == 0, result.output
+    assert lines_by_branch(result.stdout)["ticket-64"] == [
+        "keep",
+        "ticket-64",
+        "checked out in more than one worktree",
+    ]
+    assert folder.is_dir()
+    assert second.is_dir()
+
+
+def test_changes_in_a_submodule_keep_the_worktree_even_when_git_is_told_to_ignore_them(
+    aa_in, machine, tmp_path
+):
+    machine = prune_machine(machine)
+    library = tmp_path / "library"
+    library.mkdir()
+    lib = Repo(library, machine)
+    repo = Repo(tmp_path, machine)
+    folder = repo.worktree("ticket-64")
+    add_submodule = ["-c", "protocol.file.allow=always", "submodule", "add", "--quiet"]
+    repo.git(*add_submodule, str(lib.root), "lib", cwd=folder)
+    repo.git("config", "--file", ".gitmodules", "submodule.lib.ignore", "all", cwd=folder)
+    repo.git("add", ".gitmodules", cwd=folder)
+    tip = repo.commit("feat: add the library", cwd=folder)
+    machine.set_pull_requests([pull_request(64, "ticket-64", [tip], repo.commit("feat (#64)"))])
+    (folder / "lib" / "local-work.txt").write_text("not saved anywhere else\n")
+
+    result = aa_in(repo.root, "prune", env=machine.env)
+
+    assert result.exit_code == 0, result.output
+    assert lines_by_branch(result.stdout)["ticket-64"] == [
+        "keep",
+        "ticket-64",
+        "worktree has uncommitted changes",
+    ]
+    assert (folder / "lib" / "local-work.txt").exists()
+
+
+def test_a_worktree_git_cannot_read_stops_aa_before_anything_is_removed(aa_in, machine, tmp_path):
+    machine = prune_machine(machine)
+    repo = Repo(tmp_path, machine)
+    broken, broken_pr = finished_worktree(repo, "ticket-64", 64)
+    git_dir = Path(repo.git("rev-parse", "--absolute-git-dir", cwd=broken))
+    (git_dir / "index").write_bytes(b"not an index")
+    other, other_pr = finished_worktree(repo, "ticket-65", 65)
+    machine.set_pull_requests([broken_pr, other_pr])
+
+    result = aa_in(repo.root, "prune", "--json", env=machine.env)
+
+    assert result.exit_code == 1, result.output
+    error = json.loads(result.stdout)["error"]
+    assert error["code"] == "step_failed"
+    assert str(broken) in error["message"]
+    assert other.is_dir()
+    assert repo.branches() == {"main", "ticket-64", "ticket-65"}
+
+
+def merged_into_main(repo: Repo, branch: str, number: int) -> tuple[str, dict[str, Any]]:
+    """A branch merged with a merge commit, so its last commit is on main."""
+    tip = repo.branch_with_commit(branch)
+    repo.git("merge", "--quiet", "--no-ff", "--message", f"Merge #{number}", branch)
+    return tip, pull_request(number, branch, [tip], repo.git("rev-parse", "HEAD"))
+
+
+def test_an_open_pull_request_with_over_100_commits_keeps_a_branch_it_may_hold(
+    aa_in, machine, tmp_path
+):
+    machine = prune_machine(machine)
+    repo = Repo(tmp_path, machine)
+    tip, pr = merged_into_main(repo, "ticket-64", 64)
+    later = [f"{index:040x}" for index in range(1, 101)]
+    machine.set_pull_requests([pr, pull_request(65, "stacked", [tip, *later], state="OPEN")])
+
+    result = aa_in(repo.root, "prune", env=machine.env)
+
+    assert result.exit_code == 0, result.output
+    assert lines_by_branch(result.stdout)["ticket-64"] == [
+        "keep",
+        "ticket-64",
+        "PR #65 open has over 100 commits, so aa can't tell if it holds this one",
+    ]
+    assert "ticket-64" in repo.branches()
+
+
+def test_over_100_open_pull_requests_keep_every_branch_that_would_go(aa_in, machine, tmp_path):
+    machine = prune_machine(machine)
+    repo = Repo(tmp_path, machine)
+    _, pr = merged_into_main(repo, "ticket-64", 64)
+    others = [pull_request(1000 + n, f"other-{n}", [f"{n:040x}"], state="OPEN") for n in range(101)]
+    machine.set_pull_requests([pr, *others])
+
+    result = aa_in(repo.root, "prune", env=machine.env)
+
+    assert result.exit_code == 0, result.output
+    assert lines_by_branch(result.stdout)["ticket-64"] == [
+        "keep",
+        "ticket-64",
+        "over 100 open pull requests, so aa can't check them all",
+    ]
+    assert "ticket-64" in repo.branches()
+
+
+COMMIT_AS_SOMEONE = ["-c", "user.name=T", "-c", "user.email=t@example.com"]
+
+
+@pytest.mark.parametrize(
+    ("change", "reason"),
+    [
+        (
+            [*COMMIT_AS_SOMEONE, "commit", "--quiet", "--allow-empty", "--message", "wip"],
+            "new commits since aa checked it",
+        ),
+        (
+            ["switch", "--quiet", "--create", "other"],
+            "worktree switched to another branch since aa checked it",
+        ),
+    ],
+    ids=["new-commit", "switched-branch"],
+)
+def test_a_worktree_that_changes_while_gh_asks_github_is_kept(
+    aa_in, machine, tmp_path, change, reason
+):
+    machine = prune_machine(machine)
+    repo = Repo(tmp_path, machine)
+    folder, pr = finished_worktree(repo, "ticket-64", 64)
+    machine.set_pull_requests([pr])
+    machine.change_repo_during_graphql(["-C", str(folder), *change])
+
+    result = aa_in(repo.root, "prune", env=machine.env)
+
+    assert result.exit_code == 0, result.output
+    assert lines_by_branch(result.stdout)["ticket-64"] == ["keep", "ticket-64", reason]
+    assert folder.is_dir()
+    assert "ticket-64" in repo.branches()
+
+
+def test_a_branch_that_moves_while_gh_asks_github_is_kept(aa_in, machine, tmp_path):
+    machine = prune_machine(machine)
+    repo = Repo(tmp_path, machine)
+    pr = finished_branch(repo, "ticket-65", 65)
+    machine.set_pull_requests([pr])
+    machine.change_repo_during_graphql(
+        ["-C", str(repo.root), "update-ref", "refs/heads/ticket-65", "main"]
+    )
+
+    result = aa_in(repo.root, "prune", env=machine.env)
+
+    assert result.exit_code == 0, result.output
+    assert lines_by_branch(result.stdout)["ticket-65"] == [
+        "keep",
+        "ticket-65",
+        "new commits since aa checked it",
+    ]
+    assert "ticket-65" in repo.branches()
+
+
+def test_a_removed_branch_leaves_no_branch_config_behind(aa_in, machine, tmp_path):
+    machine = prune_machine(machine)
+    repo = Repo(tmp_path, machine)
+    pr = finished_branch(repo, "ticket-65", 65)
+    repo.git("config", "branch.ticket-65.remote", "origin")
+    repo.git("config", "branch.ticket-65.merge", "refs/heads/ticket-65")
+    machine.set_pull_requests([pr])
+
+    result = aa_in(repo.root, "prune", env=machine.env)
+
+    assert result.exit_code == 0, result.output
+    assert repo.branches() == {"main"}
+    assert "branch.ticket-65" not in repo.git("config", "--list", "--local")
+
+
+def test_a_branch_another_run_removed_meanwhile_counts_as_removed(aa_in, machine, tmp_path):
+    machine = prune_machine(machine)
+    repo = Repo(tmp_path, machine)
+    machine.set_pull_requests([finished_branch(repo, "ticket-65", 65)])
+    machine.change_repo_during_graphql(["-C", str(repo.root), "branch", "-D", "ticket-65"])
+
+    result = aa_in(repo.root, "prune", env=machine.env)
+
+    assert result.exit_code == 0, result.output
+    assert lines_by_branch(result.stdout)["ticket-65"] == [
+        "removed",
+        "ticket-65",
+        "already removed by another program",
+    ]

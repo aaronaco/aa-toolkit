@@ -51,7 +51,7 @@ from aa_cli.output import (
     configure_logging,
 )
 from aa_cli.prune import Action as PruneAction
-from aa_cli.prune import PruneError, format_lines
+from aa_cli.prune import PruneError, format_outcomes
 from aa_cli.prune import prune as prune_branches
 from aa_cli.redact import (
     FileError,
@@ -469,15 +469,15 @@ def prune(
     out: Output = ctx.obj
     names = branches or []
     try:
-        lines = prune_branches(Path.cwd(), names, dry_run=dry_run)
+        outcomes = prune_branches(Path.cwd(), names, dry_run=dry_run)
     except PruneError as exc:
         out.failure(exc.code, str(exc), fix=exc.fix)
         raise typer.Exit(ExitCode.PROBLEMS) from exc
-    data = {"dry_run": dry_run, "branches": [line.as_json() for line in lines]}
-    out.success(data, human=format_lines(lines))
-    failed = any(line.action is PruneAction.FAILED for line in lines)
+    data = {"dry_run": dry_run, "branches": [outcome.as_json() for outcome in outcomes]}
+    out.success(data, human=format_outcomes(outcomes))
+    failed = any(outcome.action is PruneAction.FAILED for outcome in outcomes)
     # A named branch that is kept didn't go, though the user asked for it to.
-    named_kept = bool(names) and any(line.action is PruneAction.KEEP for line in lines)
+    named_kept = bool(names) and any(outcome.action is PruneAction.KEEP for outcome in outcomes)
     if failed or named_kept:
         raise typer.Exit(ExitCode.PROBLEMS)
 
