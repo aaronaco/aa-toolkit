@@ -6,6 +6,7 @@ __lazy_modules__ = {
     "tomllib",
 }
 
+import contextlib
 import re
 import tomllib
 from collections.abc import Sequence
@@ -18,9 +19,8 @@ from aa_cli.choices import CiPart, Piece
 from aa_cli.init import (
     PYPROJECT,
     WRITE_FILES_STEP,
-    file_step,
+    StepFailed,
     step,
-    write,
 )
 
 UV_LOCK = "uv.lock"
@@ -32,6 +32,9 @@ CI_PART_FILES: dict[CiPart, tuple[str, str]] = {
     # Not in workflows/: Dependabot bumps every .yml file in that folder (ADR 0009).
     CiPart.DEPENDABOT: (".github/dependabot.yml", "dependabot.yml"),
 }
+_AUDIT_LOCK_STEP = (
+    "Run 'uv lock' and commit uv.lock: the audit workflow runs 'uv audit --locked', which needs it."
+)
 NOT_A_PROJECT_FIX = "Run aa add from the project's root folder (where pyproject.toml is)."
 _CI_TOOLS = ("ruff", "pytest")
 LOG_PACKAGE = "aa-toolkit-log"
@@ -96,14 +99,41 @@ def _add_ci(target: Path, pyproject: Path, ci_parts: Sequence[CiPart]) -> Added:
         missing = [tool for tool in _CI_TOOLS if tool not in existing]
         if missing:
             changed = _uv_step("add dev dependencies", target, "add", "--dev", *missing)
-        elif not (target / UV_LOCK).is_file():
+        elif CI_PART_FILES[CiPart.TESTS][0] in to_write or not (target / UV_LOCK).is_file():
+            # uv lock also brings an out-of-date lockfile up to date for 'uv sync --locked'.
             changed = _uv_step("lock dependencies", target, "lock")
-    if to_write:
-        with file_step(WRITE_FILES_STEP):
-            for path, content in to_write.items():
-                write(target / path, content)
-        changed.extend(to_write)
-    return Added(files=sorted(changed), next_steps=[])
+    _write_new_files(target, to_write)
+    changed.extend(to_write)
+    next_steps = []
+    if CiPart.AUDIT in chosen and not (target / UV_LOCK).is_file():
+        next_steps.append(_AUDIT_LOCK_STEP)
+    return Added(files=sorted(changed), next_steps=next_steps)
+
+
+def _write_new_files(target: Path, contents: dict[str, str]) -> None:
+    """Create every file or none, never writing over one or a link that appeared meanwhile."""
+    created: list[Path] = []
+    path = ""
+    try:
+        for path, content in contents.items():
+            file = target / path
+            file.parent.mkdir(parents=True, exist_ok=True)
+            with file.open("x", encoding="utf-8", newline="\n") as handle:
+                created.append(file)
+                handle.write(content)
+    except FileExistsError as exc:
+        _remove(created)
+        message = f"{path} appeared while aa was writing, so no CI file was written"
+        raise AddError("file_exists", message) from exc
+    except OSError as exc:
+        _remove(created)
+        raise StepFailed(WRITE_FILES_STEP, str(exc)) from exc
+
+
+def _remove(files: list[Path]) -> None:
+    for file in files:
+        with contextlib.suppress(OSError):
+            file.unlink(missing_ok=True)
 
 
 def _clash_error(chosen: list[CiPart], clashes: dict[CiPart, str]) -> AddError:
@@ -157,11 +187,16 @@ def _clash(target: Path, path: str, expected: str) -> str | None:
     for parent in file.parents:
         if parent == target:
             break
-        if parent.exists() and not parent.is_dir():
+        if _is_there(parent) and not parent.is_dir():
             return f"{parent.relative_to(target).as_posix()} already exists and is not a folder"
-    if file.exists() and not _has_content(file, expected):
+    if _is_there(file) and not _has_content(file, expected):
         return f"{path} already exists with different content"
     return None
+
+
+def _is_there(path: Path) -> bool:
+    """Whether anything is at ``path``, counting a link whose target is missing."""
+    return path.is_symlink() or path.exists()
 
 
 def _has_content(path: Path, expected: str) -> bool:
