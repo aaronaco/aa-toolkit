@@ -241,7 +241,9 @@ def assert_passes_its_own_tests_and_lint(project: Path) -> None:
         ["uv", "run", "ruff", "check", "."],
         ["uv", "run", "ruff", "format", "--check", "."],
     ):
-        result = subprocess.run(command, cwd=project, env=env, capture_output=True, text=True)
+        result = subprocess.run(
+            command, cwd=project, env=env, capture_output=True, text=True, check=False
+        )
         assert result.returncode == 0, f"{command}: {result.stdout}{result.stderr}"
 
 
@@ -533,7 +535,9 @@ def outer_files(folder: Path) -> dict[str, bytes]:
 
 
 def outer_still_locks(folder: Path) -> bool:
-    locked = subprocess.run(["uv", "lock", "--locked"], cwd=folder, capture_output=True)
+    locked = subprocess.run(
+        ["uv", "lock", "--locked"], cwd=folder, capture_output=True, check=False
+    )
     return locked.returncode == 0
 
 
@@ -558,7 +562,9 @@ def test_init_inside_another_uv_workspace_does_not_join_or_break_it(
     toplevel = Path(created.git("rev-parse", "--show-toplevel").strip())
     assert toplevel.resolve() == created.project.resolve()
     assert_staged_with_no_commits(created)
-    outer_log = subprocess.run(["git", "log"], cwd=tmp_path, env=env, capture_output=True)
+    outer_log = subprocess.run(
+        ["git", "log"], cwd=tmp_path, env=env, capture_output=True, check=False
+    )
     assert outer_log.returncode != 0  # the outer repo still has no commits
 
 
