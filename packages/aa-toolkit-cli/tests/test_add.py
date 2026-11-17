@@ -4,6 +4,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tomllib
 from pathlib import Path
 
@@ -83,6 +84,75 @@ def test_add_ci_writes_workflow_adds_dev_tools_creates_lockfile_and_leaves_git_a
     assert (project / "uv.lock").is_file()
     assert run_git(project, machine, "diff", "--cached", "--name-only") == ""
     assert run_git(project, machine, "rev-list", "--all", "--count").strip() == "0"
+
+
+WORKFLOW_TEMPLATE = (
+    Path(__file__).resolve().parents[1] / "src" / "aa_cli" / "templates" / "workflows" / "ci.yml"
+)
+_USES = re.compile(r"^\s*(?:- )?uses: (\S+)(.*)$", re.MULTILINE)
+
+
+def test_add_ci_writes_the_workflow_template_with_every_action_pinned_to_a_commit(
+    aa_in, machine, tmp_path
+):
+    machine = uv_machine(machine)
+    project = make_uv_project(tmp_path, machine)
+
+    result = aa_in(project, "add", "ci", "--json", env=machine.env)
+
+    assert result.exit_code == 0, result.output
+    workflow = (project / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    assert workflow == WORKFLOW_TEMPLATE.read_text(encoding="utf-8")
+    uses = _USES.findall(workflow)
+    assert uses
+    for action, comment in uses:
+        assert re.fullmatch(r"[\w.-]+/[\w.-]+@[0-9a-f]{40}", action), action
+        assert re.fullmatch(r" # v\d+\.\d+\.\d+", comment), (action, comment)
+    assert checkout_inputs(workflow) == {"persist-credentials": "false"}
+
+
+def checkout_inputs(workflow: str) -> dict[str, str]:
+    """The ``with:`` inputs of the workflow's one checkout step."""
+    lines = workflow.splitlines()
+    [start] = [i for i, line in enumerate(lines) if "uses: actions/checkout@" in line]
+    step_indent = len(lines[start]) - len(lines[start].lstrip("- "))
+    inputs: dict[str, str] = {}
+    in_with = False
+    for line in lines[start + 1 :]:
+        indent = len(line) - len(line.lstrip())
+        if indent < step_indent or line.lstrip().startswith("- "):
+            break
+        if indent == step_indent:
+            in_with = line.strip() == "with:"
+        elif in_with:
+            key, _, value = line.strip().partition(": ")
+            inputs[key] = value
+    return inputs
+
+
+def test_zizmor_finds_nothing_in_the_workflow_add_ci_writes(aa_in, machine, tmp_path):
+    machine = uv_machine(machine)
+    project = make_uv_project(tmp_path, machine)
+    assert aa_in(project, "add", "ci", "--json", env=machine.env).exit_code == 0
+
+    # Offline, with the default persona: the same zizmor run as the commit hook.
+    audit = subprocess.run(
+        [
+            str(Path(sys.executable).with_name("zizmor")),
+            "--offline",
+            "--no-progress",
+            "--strict-collection",
+            "--format",
+            "json",
+            str(project / ".github/workflows/ci.yml"),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+
+    assert audit.returncode == 0, audit.stdout + audit.stderr
+    assert json.loads(audit.stdout) == []
 
 
 def assert_runs_lint_and_tests_on_windows_and_linux(workflow: str) -> None:

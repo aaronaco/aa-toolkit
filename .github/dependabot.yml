@@ -6,7 +6,9 @@
 version: 2
 updates:
   - package-ecosystem: github-actions
-    directory: /
+    # The CLI's workflow templates (ADR 0009). Dependabot reads the .yml files directly inside
+    # this folder, so only workflow templates go there.
+    directories: ["/", "/packages/aa-toolkit-cli/src/aa_cli/templates/workflows"]
     schedule:
       interval: monthly
     cooldown:
