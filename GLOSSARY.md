@@ -68,9 +68,9 @@ _Avoid_: repo (when you mean a project), workspace
 One self-contained thing `aa add` puts into a project, such as the log setup or CI.
 _Avoid_: feature, add-on, extra, plugin, module
 
-**Check**:
-One part of the CI piece that can be set up on its own, in a file of its own, such as the tests, the workflow audit or Dependabot updates.
-_Avoid_: job, workflow, option, pick
+**CI part**:
+One thing the CI Piece sets up that can be added on its own, in a file of its own, such as the tests, the workflow audit or Dependabot updates.
+_Avoid_: check, job, workflow, option, pick
 
 **Output contract**:
 The promise every `aa` command keeps to whoever runs it, whether a person, a script or an agent: one machine-readable answer when asked for one, logs kept apart from that answer, the same exit codes everywhere, and never waiting for input no one can give.

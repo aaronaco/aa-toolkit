@@ -1,6 +1,6 @@
 # Projects pin actions by commit, not with the actions lockfile
 
-The workflows `aa add ci` writes pin every action to a full commit SHA in the `uses:` line, with the version in a comment, and the Dependabot Check keeps those pins current. The toolkit's own repo pins differently, with version tags and `actions.lock` (ADR 0003). The lockfile needs a preview gh extension on the developer's machine and a repo setting that aa can't write from files, so a project would get a lockfile nothing enforces. A commit pin works with no setup, and zizmor, Dependabot and GitHub's pinning setting all read it.
+The workflows `aa add ci` writes pin every action to a full commit SHA in the `uses:` line, with the version in a comment, and the Dependabot CI part keeps those pins current. The toolkit's own repo pins differently, with version tags and `actions.lock` (ADR 0003). The lockfile needs a preview gh extension on the developer's machine and a repo setting that aa can't write from files, so a project would get a lockfile nothing enforces. A commit pin works with no setup, and zizmor, Dependabot and GitHub's pinning setting all read it.
 
 ## Consequences
 
