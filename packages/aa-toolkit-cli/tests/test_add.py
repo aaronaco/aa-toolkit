@@ -276,14 +276,18 @@ def test_adding_the_tests_part_brings_an_out_of_date_lockfile_up_to_date(aa_in, 
         encoding="utf-8",
     )
     lock_check = ["uv", "lock", "--check"]
-    stale = subprocess.run(lock_check, cwd=project, env=host_env(machine), capture_output=True)
+    stale = subprocess.run(
+        lock_check, cwd=project, env=host_env(machine), capture_output=True, check=False
+    )
     assert stale.returncode != 0
 
     result = aa_in(project, "add", "ci", "--only", "tests", "--json", env=machine.env)
 
     assert result.exit_code == 0, result.output
     assert json.loads(result.stdout)["data"]["files"] == [".github/workflows/ci.yml", "uv.lock"]
-    fresh = subprocess.run(lock_check, cwd=project, env=host_env(machine), capture_output=True)
+    fresh = subprocess.run(
+        lock_check, cwd=project, env=host_env(machine), capture_output=True, check=False
+    )
     assert fresh.returncode == 0, fresh.stderr
 
 
@@ -635,15 +639,29 @@ def make_symlink(link: Path, target: Path) -> None:
         pytest.skip("this user can't create symbolic links")
 
 
+ZIZMOR_TEMPLATE = TEMPLATES / "workflows" / "zizmor.yml"
+
+
 @pytest.mark.parametrize(
-    "link", [".github/workflows/zizmor.yml", ".github"], ids=["file", "parent-folder"]
+    ("link", "outside_is"),
+    [
+        (".github/workflows/zizmor.yml", "missing"),
+        (".github", "missing"),
+        (".github", "a folder"),
+        (".github/workflows/zizmor.yml", "the template"),
+    ],
+    ids=["dangling-file", "dangling-folder", "folder-outside", "matching-file-outside"],
 )
-def test_a_dangling_link_where_a_file_goes_is_a_clash(aa_in, machine, tmp_path, link):
+def test_a_link_where_a_file_goes_is_a_clash(aa_in, machine, tmp_path, link, outside_is):
     machine.add_real("git")
     (tmp_path / "project").mkdir()
     project = make_uv_project(tmp_path / "project", machine)
     machine.add_fake_uv()
     outside = tmp_path / "outside"
+    if outside_is == "a folder":
+        outside.mkdir()
+    elif outside_is == "the template":
+        outside.write_text(ZIZMOR_TEMPLATE.read_text(encoding="utf-8"), encoding="utf-8")
     (project / link).parent.mkdir(parents=True, exist_ok=True)
     make_symlink(project / link, outside)
 
@@ -653,9 +671,12 @@ def test_a_dangling_link_where_a_file_goes_is_a_clash(aa_in, machine, tmp_path, 
     error = json.loads(result.stdout)["error"]
     assert error["code"] == "file_exists"
     assert link in error["message"]
-    assert not outside.exists()
     assert (project / link).is_symlink()
     assert not (project / ".github/dependabot.yml").exists()
+    if outside_is == "a folder":
+        assert list(outside.iterdir()) == []
+    elif outside_is == "missing":
+        assert not outside.exists()
 
 
 def test_a_file_that_appears_while_aa_writes_is_kept_and_nothing_is_left_written(
@@ -710,8 +731,9 @@ def test_a_failed_write_removes_the_files_this_run_wrote(aa_in, machine, tmp_pat
             self.handle.write(text[:10])
             raise OSError(28, "No space left on device")
 
-    def open_that_fills_the_disk(self, mode="r", *args, **kwargs):
-        handle = real_open(self, mode, *args, **kwargs)
+    def open_that_fills_the_disk(self, *args, **kwargs):
+        handle = real_open(self, *args, **kwargs)
+        mode = args[0] if args else kwargs.get("mode", "r")
         if self.name == "dependabot.yml" and "x" in mode:
             return DiskFillsUp(handle)
         return handle

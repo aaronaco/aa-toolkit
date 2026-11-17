@@ -130,10 +130,10 @@ def _write_new_files(target: Path, contents: dict[str, str]) -> None:
         raise StepFailed(WRITE_FILES_STEP, str(exc)) from exc
 
 
-def _remove(files: list[Path]) -> None:
-    for file in files:
+def _remove(paths: list[Path]) -> None:
+    for path in paths:
         with contextlib.suppress(OSError):
-            file.unlink(missing_ok=True)
+            path.unlink(missing_ok=True)
 
 
 def _clash_error(chosen: list[CiPart], clashes: dict[CiPart, str]) -> AddError:
@@ -187,16 +187,20 @@ def _clash(target: Path, path: str, expected: str) -> str | None:
     for parent in file.parents:
         if parent == target:
             break
-        if _is_there(parent) and not parent.is_dir():
-            return f"{parent.relative_to(target).as_posix()} already exists and is not a folder"
-    if _is_there(file) and not _has_content(file, expected):
+        rel = parent.relative_to(target).as_posix()
+        if parent.is_symlink():
+            return _LINK_CLASH.format(rel)
+        if parent.exists() and not parent.is_dir():
+            return f"{rel} already exists and is not a folder"
+    if file.is_symlink():
+        return _LINK_CLASH.format(path)
+    if file.exists() and not _has_content(file, expected):
         return f"{path} already exists with different content"
     return None
 
 
-def _is_there(path: Path) -> bool:
-    """Whether anything is at ``path``, counting a link whose target is missing."""
-    return path.is_symlink() or path.exists()
+# A link could point anywhere, even outside the project, so aa never writes through one.
+_LINK_CLASH = "{} is a link, and aa doesn't write through links"
 
 
 def _has_content(path: Path, expected: str) -> bool:
