@@ -76,6 +76,10 @@ _Avoid_: contract (on its own, or for anything else), API, interface
 The file `aa` saves on the user's computer when a command fails with an unexpected error. It holds what's needed to fix the bug, with sensitive values taken out, and is never uploaded.
 _Avoid_: crash log, dump, bug report, telemetry
 
+**Finished branch**:
+A local branch whose last commit is one of the commits of a pull request GitHub shows as merged, with no open pull request containing that commit. `aa prune` removes only finished branches and their worktrees, and only when nothing would be lost.
+_Avoid_: merged branch (git calls a branch merged only when its commits are on the default branch, which a squash merge never does), stale branch, dead branch
+
 **Release**:
 Choosing a project's next version, recording its changelog and tagging it.
 _Avoid_: ship, deploy

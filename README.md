@@ -106,6 +106,32 @@ cat api_key.txt | aa secret set api_key --app my-app --json
 aa secret delete api_key
 ```
 
+`aa prune [BRANCH...]` cleans up the repo it runs in once pull requests merge: it deletes each Finished branch and removes its worktree folder, and keeps everything whose work isn't already in a merged pull request. It looks at every local branch, with or without a worktree, and asks GitHub through gh, because a squash merge never makes a branch merged to git. A branch goes only when one of the commits of a merged pull request is its last commit, no open pull request contains that commit, and its worktree, if it has one, has no uncommitted changes or untracked files, isn't locked, isn't the folder `aa prune` runs from and isn't the repo's main folder. Gitignored files, such as `.venv`, go with the folder. Every other branch is kept, and its line says why: an open pull request, uncommitted changes or new files, a locked worktree, commits added after the pull request merged, no merged pull request (a pull request closed without merging counts as none), the folder `aa prune` runs from or the main folder, or a worktree whose folder is missing (`git worktree prune` clears those). Worktrees with no branch checked out are listed as kept. Remote branches are left alone, since GitHub deletes them when a pull request merges.
+
+To keep a worktree for good, lock it with `git worktree lock <path>`; aa has no setting of its own for it. Naming branches limits the run to them, with the same rules. There is no confirmation prompt: `--dry-run` shows what would happen and changes nothing. It works with one repo on github.com through gh, which must be signed in.
+
+`aa prune` exits `0` even when it keeps branches. It exits `1` when a worktree folder can't be removed, for example because a terminal or editor on Windows holds a file in it open (that branch is reported as `failed` with git's message, and the other removals still happen), or when a branch you named is kept. A name that isn't a local branch fails before anything changes. With `--json` (or `AA_JSON=1`), `data` holds `dry_run` and `branches`, each with its `branch` (null for a detached worktree), `action` (`would_remove`, `removed`, `keep` or `failed`), `reason`, `pull_request` (a number or null) and `worktree` (its path or null).
+
+```bash
+aa prune --dry-run
+```
+
+```text
+keep          main       the folder aa runs from
+would remove  ticket-64  PR #69 merged, worktree clean
+would remove  ticket-65  PR #70 merged, no worktree
+keep          ticket-72  worktree has uncommitted changes
+keep          ticket-84  PR #89 open
+```
+
+```bash
+aa prune
+```
+
+```bash
+aa prune ticket-64 --json
+```
+
 `aa commands` lists every visible command with its summary. With `--json` (or `AA_JSON=1`), it follows the Output contract and describes the exit codes, the global flags (`--json`, `--verbose`, `--version`), and each command's summary, arguments, options and effect (`read` or `write`), so an agent or script can learn how to run `aa` without reading `--help`.
 
 ```bash
@@ -260,13 +286,17 @@ Every `aa` command follows the same rules, so scripts and AI agents can rely on 
 |---|---|---|
 | `target_not_empty` | `1` | `aa init` found the target folder already has something in it. Nothing was changed. |
 | `target_in_workspace` | `1` | `aa init` found an outer uv workspace whose `members` would include the target. The fix names the `exclude` entry to add. Nothing was changed. |
-| `step_failed` | `1` | An `aa init` step failed. The message names the step and what went wrong. When `aa init` had started writing, the folder is left as it is and the message says to delete it before running `aa init` again; a missing git `user.name` fails before anything is written. When creating the GitHub repo fails, the fix is the `gh repo create` command to rerun from inside the project, or `git push --set-upstream origin main` when the repo was created and only the push failed. |
+| `step_failed` | `1` | An `aa init` step failed. The message names the step and what went wrong. When `aa init` had started writing, the folder is left as it is and the message says to delete it before running `aa init` again; a missing git `user.name` fails before anything is written. When creating the GitHub repo fails, the fix is the `gh repo create` command to rerun from inside the project, or `git push --set-upstream origin main` when the repo was created and only the push failed. In `aa prune`, a git command that reads the repo failed, and nothing changed. |
 | `file_not_found` | `1` | `aa redact` was given a file path that does not exist. The message names the path. |
 | `cannot_read` | `1` | `aa redact` was given a folder or a file that cannot be read. The message says why. |
 | `secret_too_large` | `1` | `aa secret set` was given a value over Credential Manager's limit. The message gives its size and the limit in bytes, never the value. Nothing was saved. |
 | `secret_not_found` | `1` | `aa secret delete` found no saved Secret for that app and name. Nothing changed. |
 | `no_secret_store` | `1` | `aa secret set` or `aa secret delete` found no Secret store on this machine. |
-| `usage` | `2` | Bad or conflicting flags, a missing argument, an `aa init` name that breaks the name rule, `aa redact` with no file and a terminal for standard input, or for `aa secret`: a `NAME` no Settings field can have, no app name (the message names `--app`), an empty value, or `--json` with a terminal for standard input. Nothing was created. |
+| `not_a_git_repo` | `1` | `aa prune` ran outside a git repo. Nothing changed. |
+| `branch_not_found` | `1` | `aa prune` was given a name that isn't a local branch. The message names it. Nothing changed. |
+| `gh_signed_out` | `1` | `aa prune` found gh signed out of github.com. The fix is `gh auth login`. Nothing changed. |
+| `no_github_remote` | `1` | `aa prune` found no GitHub repo for the repo it runs in. The message holds gh's error, and the fix is the `git remote add` command. Nothing changed. |
+| `github_request_failed` | `1` | `aa prune` couldn't ask GitHub about the pull requests, for example because it's offline. The message holds gh's error. Nothing changed. || `usage` | `2` | Bad or conflicting flags, a missing argument, an `aa init` name that breaks the name rule, `aa redact` with no file and a terminal for standard input, or for `aa secret`: a `NAME` no Settings field can have, no app name (the message names `--app`), an empty value, or `--json` with a terminal for standard input. Nothing was created. |
 | `aborted` | `130` | Ctrl+C stopped the command, including at the `aa secret set` prompt. When `aa init` had started writing, the message says the folder was left as it is. |
 | `unexpected` | `3` | An uncaught error, such as uv, git or gh missing from PATH, or a Secret store that fails (the message never holds the value). `fix` names the Crash report saved for it (see the CLI README), or is null when the report can't be saved. Rerun with `--verbose` for the traceback. |
 

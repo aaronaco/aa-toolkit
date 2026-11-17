@@ -22,8 +22,13 @@ _REPO_VARIABLES = {
 }
 
 
-def run(tool: str, *args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
-    """Run a tool found on PATH, capture its output and log the command and exit code."""
+def run(
+    tool: str, *args: str, cwd: Path | None = None, stdin: str | None = None
+) -> subprocess.CompletedProcess[str]:
+    """Run a tool found on PATH, capture its output and log the command and exit code.
+
+    ``stdin`` is text sent to the tool's standard input.
+    """
     command_line = " ".join([tool, *args])
     executable = shutil.which(tool)
     if executable is None:
@@ -33,6 +38,7 @@ def run(tool: str, *args: str, cwd: Path | None = None) -> subprocess.CompletedP
         [executable, *args],
         cwd=cwd,
         env={key: value for key, value in os.environ.items() if key not in _REPO_VARIABLES},
+        input=stdin,
         capture_output=True,
         text=True,
         encoding="utf-8",
