@@ -2,12 +2,14 @@
 
 __lazy_modules__ = {
     "aa_cli.init",
+    "importlib.resources",
     "tomllib",
 }
 
 import re
 import tomllib
 from dataclasses import dataclass
+from importlib.resources import files
 from pathlib import Path
 from typing import Any
 
@@ -16,14 +18,13 @@ from aa_cli.init import (
     PYPROJECT,
     WRITE_FILES_STEP,
     file_step,
-    render,
     step,
     write,
 )
 
 UV_LOCK = "uv.lock"
 CI_WORKFLOW = ".github/workflows/ci.yml"
-CI_TEMPLATE = "ci.yml.tmpl"
+CI_TEMPLATE = "ci.yml"
 NOT_A_PROJECT_FIX = "Run aa add from the project's root folder (where pyproject.toml is)."
 _CI_TOOLS = ("ruff", "pytest")
 LOG_PACKAGE = "aa-toolkit-log"
@@ -68,7 +69,7 @@ def add_piece(target: Path, piece: Piece) -> Added:
 
 def _add_ci(target: Path, pyproject: Path) -> Added:
     workflow = target / CI_WORKFLOW
-    expected = render(CI_TEMPLATE)
+    expected = workflow_template(CI_TEMPLATE)
     workflow_already_there = _check_workflow_path(target, workflow, expected)
     existing = _declared_dependencies(pyproject)
     missing = [tool for tool in _CI_TOOLS if tool not in existing]
@@ -83,6 +84,11 @@ def _add_ci(target: Path, pyproject: Path) -> Added:
             write(workflow, expected)
         changed.append(CI_WORKFLOW)
     return Added(files=sorted(changed), next_steps=[])
+
+
+def workflow_template(name: str) -> str:
+    """A workflow template as it is, with no placeholders: Dependabot keeps its pins current."""
+    return (files("aa_cli") / "templates" / "workflows" / name).read_text(encoding="utf-8")
 
 
 def _add_log(target: Path, pyproject: Path) -> Added:

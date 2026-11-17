@@ -184,7 +184,7 @@ The toolkit needs uv 0.13.7 exactly. `required-version` in `pyproject.toml` sets
 uv self update 0.13.7
 ```
 
-Dependabot doesn't change `required-version`, so upgrade uv by hand: pick a release at least 7 days old, change `required-version`, and change the version in this section to match.
+Dependabot doesn't change `required-version`, so upgrade uv by hand: pick a release at least 7 days old, change `required-version`, and change the version in this section and in the workflow templates to match. Dependabot bumps only the templates' `uses:` lines.
 
 uv packages get a 7-day cooldown from `exclude-newer = "7 days"` in `pyproject.toml`. uv skips any file uploaded less than 7 days ago, so `uv lock --upgrade` and `uv lock --upgrade-package` only reach versions at least that old. A file added later to an old release waits 7 days too. Workspace members aren't affected. `uv.lock` records the window, not a date, so it doesn't go stale as days pass. uv only moves the cutoff when it resolves again.
 
@@ -224,7 +224,7 @@ On `main`, this reports `no-commit-to-branch` as failed, because commits there a
 
 ### Workflow audit
 
-[zizmor](https://docs.zizmor.sh/) audits the GitHub Actions workflows and the Dependabot config. The `zizmor` hook runs it offline, and a finding stops a commit and a merge. The `zizmor` workflow also runs the online audits and sends results to the Security tab, but its findings don't block merges.
+[zizmor](https://docs.zizmor.sh/) audits the GitHub Actions workflows, the workflow templates in `packages/aa-toolkit-cli/src/aa_cli/templates/workflows` and the Dependabot config. The `zizmor` hook runs it offline, and a finding stops a commit and a merge. The `zizmor` workflow also runs the online audits and sends results to the Security tab, but its findings don't block merges.
 
 `uv.lock` pins the zizmor that the hook uses. Upgrade it by hand with `uv lock --upgrade-package zizmor`. The workflow uses the zizmor that the action pins, and Dependabot upgrades the action.
 
