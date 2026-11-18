@@ -20,9 +20,7 @@ def check_signed_in(cwd: Path) -> None:
     """Fail unless gh is signed in to github.com."""
     auth = run("gh", "auth", "status", "--hostname", "github.com", cwd=cwd)
     if auth.returncode != 0:
-        raise GitHubError(
-            "gh_signed_out", "gh is not signed in to github.com", fix="gh auth login"
-        )
+        raise GitHubError("gh_signed_out", "gh is not signed in to github.com", fix="gh auth login")
 
 
 def folder_repo(cwd: Path, *, fix: str) -> tuple[str, str]:

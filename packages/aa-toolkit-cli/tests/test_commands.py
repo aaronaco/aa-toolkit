@@ -184,6 +184,21 @@ def test_prune_entry_describes_optional_branches_dry_run_and_write_effect(aa) ->
     assert dry_run["help"]
 
 
+def test_standup_entry_is_listed_with_read_effect_and_its_three_flags(aa) -> None:
+    result = aa("commands", "--json")
+
+    assert result.exit_code == 0, result.output
+    standup_cmd = _command_by_name(json.loads(result.stdout)["data"], "standup")
+    assert standup_cmd["summary"] == "Print what you did on GitHub, by day and repo."
+    assert standup_cmd["effect"] == "read"
+    assert standup_cmd["arguments"] == []
+    options = {opt["flag"]: opt for opt in standup_cmd["options"]}
+    assert list(options) == ["--since", "--repo", "--all"]
+    assert options["--since"]["default"] == "yesterday"
+    assert options["--repo"]["repeatable"] is True
+    assert options["--all"]["type"] == "boolean"
+
+
 def test_commands_entry_is_listed_with_read_effect(aa) -> None:
     result = aa("commands", "--json")
 
@@ -271,6 +286,7 @@ def test_commands_in_human_mode_prints_each_visible_command_with_its_summary(aa)
         ["init", "Create a project in a new or empty folder."],
         ["redact", "Print a cleaned copy of a file or piped text."],
         ["prune", "Remove Finished branches and their worktrees."],
+        ["standup", "Print what you did on GitHub, by day and repo."],
         ["commands", "List every command, its arguments, flags and exit codes."],
         ["secret set", "Save a Secret in the Secret store."],
         ["secret delete", "Delete a Secret from the Secret store."],

@@ -24,6 +24,15 @@ _PREFIX = re.compile(r"^[A-Za-z]+(?:\([^)]*\))?!?: +")
 _FROM_PULL_REQUEST = re.compile(r"\(#\d+\)$|^Merge pull request #\d+")
 
 
+# A GitHub repo: "name" of the signed-in account, or "owner/name".
+_REPO_NAME = re.compile(r"(?:[A-Za-z0-9-]+/)?[A-Za-z0-9._-]+")
+
+
+def is_repo_name(text: str) -> bool:
+    """Whether ``text`` can name a GitHub repo, as ``name`` or ``owner/name``."""
+    return _REPO_NAME.fullmatch(text) is not None
+
+
 class SinceError(ValueError):
     """``--since`` names no day aa understands, or a day after today."""
 
@@ -136,7 +145,11 @@ def standup(cwd: Path, since: date, repos: Sequence[str], *, all_repos: bool) ->
     merged = _search(cwd, "prs", "--merged-at", qualifier, pr_fields, repo_flags)
     opened = _search(cwd, "prs", "--created", qualifier, pr_fields, repo_flags)
     issues = _search(
-        cwd, "issues", "--created", qualifier, "number,title,url,repository,createdAt,isPullRequest",
+        cwd,
+        "issues",
+        "--created",
+        qualifier,
+        "number,title,url,repository,createdAt,isPullRequest",
         repo_flags,
     )
     commits = _search(
@@ -193,8 +206,10 @@ def _local_day(timestamp: str) -> date:
 
 
 def _repo(item: dict[str, Any]) -> str:
+    # Pull request and issue search name it nameWithOwner; commit search calls it fullName.
     repository = item["repository"]
-    return repository.get("nameWithOwner") or repository["fullName"]
+    name: str = repository.get("nameWithOwner") or repository["fullName"]
+    return name
 
 
 def _by_day(
@@ -234,7 +249,10 @@ def _by_day(
             for items in (repo_day.merged, repo_day.opened, repo_day.issues):
                 items.sort(key=lambda found: found.number)
             repo_day.pushed.sort(key=lambda push: push.committed)
-    return [(day, list(days[day].values())) for day in sorted(days)]
+    return [
+        (day, [days[day][repo] for repo in sorted(days[day], key=str.casefold)])
+        for day in sorted(days)
+    ]
 
 
 def _shown_name(repo: str, login: str) -> str:
@@ -270,9 +288,13 @@ def format_standup(result: Standup) -> str:
 def _parts(entry: RepoDay) -> list[str]:
     parts = []
     if entry.merged:
-        parts.append("merged " + ", ".join(f"#{i.number} ({_title(i.title)})" for i in entry.merged))
+        parts.append(
+            "merged " + ", ".join(f"#{i.number} ({_title(i.title)})" for i in entry.merged)
+        )
     if entry.opened:
-        parts.append("opened " + ", ".join(f"#{i.number} ({_title(i.title)})" for i in entry.opened))
+        parts.append(
+            "opened " + ", ".join(f"#{i.number} ({_title(i.title)})" for i in entry.opened)
+        )
     if entry.issues:
         parts.append("tickets " + ", ".join(f"#{i.number}" for i in entry.issues))
     if entry.pushed:

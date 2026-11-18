@@ -21,8 +21,8 @@ import os
 import re
 import shlex
 import sys
-from datetime import date
 from collections.abc import Callable, Generator, Sequence
+from datetime import date
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -75,7 +75,7 @@ from aa_cli.redact import (
     redact_file,
 )
 from aa_cli.secret import NotUtf8, field_name, project_name, read_piped_value
-from aa_cli.standup import SinceError, format_standup, parse_since
+from aa_cli.standup import SinceError, format_standup, is_repo_name, parse_since
 from aa_cli.standup import standup as ask_standup
 from aa_settings import SecretStoreError, delete_secret, save_secret
 
@@ -555,6 +555,11 @@ def standup(
     names = repos or []
     if all_repos and names:
         raise typer.BadParameter("use only one of them", ctx=ctx, param_hint="'--all' / '--repo'")
+    bad = next((name for name in names if not is_repo_name(name)), None)
+    if bad is not None:
+        raise typer.BadParameter(
+            f"{bad!r} isn't a repo name; give name or owner/name", ctx=ctx, param_hint="'--repo'"
+        )
     try:
         day = parse_since(since, date.today())
     except SinceError as exc:
