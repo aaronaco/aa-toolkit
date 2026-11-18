@@ -46,3 +46,8 @@ def run(
     )
     log.debug("%s: exit %d", command_line, result.returncode)
     return result
+
+
+def error_line(result: subprocess.CompletedProcess[str]) -> str:
+    """A tool's error message on one line."""
+    return " ".join((result.stderr or result.stdout).split())

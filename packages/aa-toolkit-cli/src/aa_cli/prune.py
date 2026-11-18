@@ -1,6 +1,6 @@
 """``aa prune``: remove each Finished branch and its worktree, and keep everything else."""
 
-__lazy_modules__ = {"aa_cli.process", "json", "subprocess"}
+__lazy_modules__ = {"aa_cli.github", "aa_cli.process", "json", "subprocess"}
 
 import json
 import logging
@@ -12,7 +12,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-from aa_cli.process import run
+from aa_cli.github import GitHubError, check_signed_in, folder_repo
+from aa_cli.process import error_line, run
 
 log = logging.getLogger("aa")
 
@@ -159,11 +160,6 @@ def prune(cwd: Path, names: Sequence[str], *, dry_run: bool) -> list[Outcome]:
     return outcomes
 
 
-def _tool_error(result: subprocess.CompletedProcess[str]) -> str:
-    """A tool's error message on one line."""
-    return " ".join((result.stderr or result.stdout).split())
-
-
 def _top_level(cwd: Path) -> Path:
     result = run("git", "rev-parse", "--show-toplevel", cwd=cwd)
     if result.returncode != 0:
@@ -178,7 +174,7 @@ def _top_level(cwd: Path) -> Path:
 def _git(cwd: Path, *args: str) -> str:
     result = run("git", *args, cwd=cwd)
     if result.returncode != 0:
-        detail = _tool_error(result)
+        detail = error_line(result)
         raise PruneError("step_failed", f"git {args[0]} in {cwd} failed: {detail}; nothing changed")
     return result.stdout
 
@@ -234,22 +230,11 @@ def _local_branches(top: Path) -> dict[str, _Branch]:
 
 def _github_repo(top: Path) -> tuple[str, str]:
     """The owner and name of the repo's GitHub repo, as gh sees it."""
-    auth = run("gh", "auth", "status", "--hostname", "github.com", cwd=top)
-    if auth.returncode != 0:
-        raise PruneError(
-            "gh_signed_out",
-            "gh is not signed in to github.com; nothing changed",
-            fix="gh auth login",
-        )
-    view = run("gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner", cwd=top)
-    owner, _, name = view.stdout.strip().partition("/")
-    if view.returncode != 0 or not name:
-        raise PruneError(
-            "no_github_remote",
-            f"gh found no GitHub repo for {top}: {_tool_error(view)}",
-            fix="git remote add origin https://github.com/OWNER/REPO.git",
-        )
-    return owner, name
+    try:
+        check_signed_in(top)
+        return folder_repo(top, fix="git remote add origin https://github.com/OWNER/REPO.git")
+    except GitHubError as exc:
+        raise PruneError(exc.code, f"{exc}; nothing changed", fix=exc.fix) from None
 
 
 def _ask_github(top: Path, owner: str, repo: str, branches: list[_Branch]) -> _GitHub:
@@ -270,7 +255,7 @@ def _ask_github(top: Path, owner: str, repo: str, branches: list[_Branch]) -> _G
         if result.returncode != 0:
             raise PruneError(
                 "github_request_failed",
-                f"Asking GitHub about the pull requests failed: {_tool_error(result)};"
+                f"Asking GitHub about the pull requests failed: {error_line(result)};"
                 " nothing changed",
             )
         repository = json.loads(result.stdout)["data"]["repository"]
@@ -470,7 +455,7 @@ def _remove(top: Path, branch: _Branch, outcome: Outcome) -> Outcome:
     # -D can't check that. Its config section goes too, as git branch -D would remove it.
     deleted = run("git", "update-ref", "-d", branch.ref, branch.tip, cwd=top)
     if deleted.returncode != 0:
-        return outcome.but(Action.FAILED, _tool_error(deleted))
+        return outcome.but(Action.FAILED, error_line(deleted))
     run("git", "config", "--remove-section", f"branch.{branch.name}", cwd=top)
     return outcome.but(Action.REMOVED)
 
@@ -499,9 +484,9 @@ def _removal_failure(top: Path, folder: Path, removed: subprocess.CompletedProce
     except PruneError:
         still_registered = True  # the safer advice: don't delete a folder git still tracks
     if still_registered:
-        return f"{_tool_error(removed)}; close any program using {folder} and run aa prune again"
+        return f"{error_line(removed)}; close any program using {folder} and run aa prune again"
     return (
-        f"{_tool_error(removed)}; git already unregistered the worktree, so close any program"
+        f"{error_line(removed)}; git already unregistered the worktree, so close any program"
         f" using {folder} and delete that folder"
     )
 
