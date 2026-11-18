@@ -88,7 +88,9 @@ if sys.argv[1:] == ["api", "graphql", "--input", "-"]:
     for args in state["during_graphql"]:  # another program changing the repo meanwhile
         subprocess.run([git, *args], check=True, capture_output=True)
     query, variables = body["query"], body["variables"]
-    prs = state["pull_requests"]
+    # A pull request with a "repo" belongs to that repo only; one without belongs to any.
+    asked = f"{variables['owner']}/{variables['name']}"
+    prs = [pr for pr in state["pull_requests"] if pr.get("repo") in (None, asked)]
     on_github = {oid for pr in prs for oid in [*pr["commits"], pr["merge_commit"]] if oid}
 
     def on_default_branch(oid):

@@ -199,15 +199,19 @@ def test_a_pull_request_merged_the_day_it_opened_shows_only_as_merged(aa_in, mac
     )
 
 
-def on_github(number: int, commits: list[str], merge_commit: str | None) -> dict[str, Any]:
+def on_github(
+    number: int, commits: list[str], merge_commit: str | None, repo: str | None = None
+) -> dict[str, Any]:
     """A merged pull request as GitHub links it to commits: its own and the one it left on the
-    default branch (a squash or merge commit, or None for a rebase merge)."""
+    default branch (a squash or merge commit, or None for a rebase merge). With ``repo``,
+    GitHub links them only in that repo."""
     return {
         "number": number,
         "state": "MERGED",
         "head": f"branch-{number}",
         "commits": commits,
         "merge_commit": merge_commit,
+        "repo": repo,
     }
 
 
@@ -550,6 +554,7 @@ def test_json_gives_the_span_start_the_repos_and_every_days_entries(aa_in, machi
             "since": midnight(date(2026, 11, 17)),
             "all_repos": False,
             "repos": ["test-user/vibes", "owner/other"],
+            "incomplete": [],
             "days": [
                 {
                     "date": "2026-11-17",
@@ -622,6 +627,7 @@ def test_json_with_every_repo_says_so(aa_in, machine, tmp_path):
         "since": midnight(date(2026, 11, 17)),
         "all_repos": True,
         "repos": [],
+        "incomplete": [],
         "days": [],
     }
 
@@ -777,3 +783,38 @@ def test_control_characters_in_titles_and_subjects_never_reach_the_terminal(
     assert result.stdout == (
         '2026-11-17\n  app: opened #1 ([2Jclear)\n       pushed "Push ]8;;x\\link"\n'
     )
+
+
+def test_json_names_every_kind_whose_search_hit_githubs_limit(aa_in, machine, tmp_path):
+    machine = standup_machine(machine)
+    machine.set_search_results(
+        issues=[
+            issue("test-user/app", number, "Many", local("2026-11-17")) for number in range(1, 1001)
+        ]
+    )
+    folder, env = outside_any_repo(tmp_path, machine)
+
+    result = aa_in(folder, "standup", "--since", "2026-11-17", "--json", env=env)
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["data"]["incomplete"] == ["issues"]
+
+
+def test_a_commit_merged_by_pull_request_in_one_repo_still_shows_as_pushed_in_another(
+    aa_in, machine, tmp_path
+):
+    machine = standup_machine(machine)
+    shared = "5" * 40  # a fork and its upstream share commits
+    machine.set_search_results(
+        commits=[
+            commit("test-user/fork", shared, "Fix the build", local("2026-11-17")),
+            commit("upstream/app", shared, "Fix the build", local("2026-11-17")),
+        ]
+    )
+    machine.set_pull_requests([on_github(3, [shared], None, repo="upstream/app")])
+    folder, env = outside_any_repo(tmp_path, machine)
+
+    result = aa_in(folder, "standup", "--since", "2026-11-17", env=env)
+
+    assert result.exit_code == 0, result.output
+    assert result.stdout == '2026-11-17\n  fork: pushed "Fix the build"\n'

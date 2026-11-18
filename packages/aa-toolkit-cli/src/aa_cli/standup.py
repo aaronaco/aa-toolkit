@@ -26,6 +26,20 @@ WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", 
 # lowercase, so a title such as "Windows: support long paths" keeps its first word.
 _PREFIX = re.compile(r"^[a-z]+(?:\([^)]*\))?!?: +")
 
+# Each search: the JSON section it fills, the gh search kind, its date flag and its fields.
+_SEARCHES = (
+    ("merged", "prs", "--merged-at", "number,title,url,repository,createdAt,closedAt,state"),
+    ("opened", "prs", "--created", "number,title,url,repository,createdAt,closedAt,state"),
+    ("issues", "issues", "--created", "number,title,url,repository,createdAt,isPullRequest"),
+    ("pushed", "commits", "--committer-date", "sha,url,repository,commit"),
+)
+_SECTION_NAMES = {
+    "merged": "merged pull requests",
+    "opened": "opened pull requests",
+    "issues": "issues",
+    "pushed": "commits",
+}
+
 # Commits asked about in one GraphQL request, and pull requests read per commit.
 COMMIT_BATCH = 50
 LINKED_LIMIT = 10
@@ -133,12 +147,14 @@ class Standup:
     login: str
     repos: list[str] | None  # owner/name each, or None for every repo
     days: list[tuple[date, list[RepoDay]]]
+    incomplete: list[str]  # the sections whose search reached GitHub's limit
 
     def as_json(self) -> dict[str, Any]:
         return {
             "since": self.since.isoformat(),
             "all_repos": self.repos is None,
             "repos": self.repos or [],
+            "incomplete": self.incomplete,
             "days": [
                 {"date": day.isoformat(), "repos": [entry.as_json() for entry in entries]}
                 for day, entries in self.days
@@ -161,22 +177,20 @@ def standup(cwd: Path, since: date, repos: Sequence[str], *, all_repos: bool) ->
     now = datetime.now().astimezone().replace(microsecond=0)
     qualifier = f"{start.isoformat()}..{now.isoformat()}"
     repo_flags = [arg for repo in scope or [] for arg in ("--repo", repo)]
-    pr_fields = "number,title,url,repository,createdAt,closedAt,state"
-    merged = _search(cwd, "prs", "--merged-at", qualifier, pr_fields, repo_flags)
-    opened = _search(cwd, "prs", "--created", qualifier, pr_fields, repo_flags)
-    issues = _search(
-        cwd,
-        "issues",
-        "--created",
-        qualifier,
-        "number,title,url,repository,createdAt,isPullRequest",
-        repo_flags,
-    )
-    commits = _search(
-        cwd, "commits", "--committer-date", qualifier, "sha,url,repository,commit", repo_flags
-    )
-    pushed = _without_pull_request_commits(cwd, commits)
-    return Standup(start, login, scope, _by_day(merged, opened, issues, pushed))
+    found = {
+        section: _search(cwd, [kind, date_flag, qualifier, "--json", fields, *repo_flags])
+        for section, kind, date_flag, fields in _SEARCHES
+    }
+    incomplete = [section for section, results in found.items() if len(results) >= SEARCH_LIMIT]
+    for section in incomplete:
+        log.warning(
+            "GitHub search stops at %d %s, so some may be missing; use a later --since",
+            SEARCH_LIMIT,
+            _SECTION_NAMES[section],
+        )
+    pushed = _without_pull_request_commits(cwd, found["pushed"])
+    days = _by_day(found["merged"], found["opened"], found["issues"], pushed)
+    return Standup(start, login, scope, days, incomplete)
 
 
 def _login(cwd: Path) -> str:
@@ -205,26 +219,17 @@ def _inside_git_repo(cwd: Path) -> bool:
     return inside.returncode == 0 and inside.stdout.strip() == "true"
 
 
-def _search(
-    cwd: Path, kind: str, date_flag: str, qualifier: str, fields: str, repo_flags: list[str]
-) -> list[dict[str, Any]]:
-    """One gh search for the whole span: the user's own work of ``kind`` since the qualifier."""
+def _search(cwd: Path, args: list[str]) -> list[dict[str, Any]]:
+    """One gh search of the user's own work for the whole span; ``args`` starts with the kind."""
+    kind, *rest = args
     result = run(
-        "gh", "search", kind, "--author", "@me", date_flag, qualifier,
-        "--limit", str(SEARCH_LIMIT), "--json", fields, *repo_flags,
-        cwd=cwd,
-    )  # fmt: skip
+        "gh", "search", kind, "--author", "@me", "--limit", str(SEARCH_LIMIT), *rest, cwd=cwd
+    )
     if result.returncode != 0:
         raise GitHubError(
             "github_request_failed", f"Searching GitHub for {kind} failed: {error_line(result)}"
         )
     found: list[dict[str, Any]] = json.loads(result.stdout or "[]")
-    if len(found) >= SEARCH_LIMIT:
-        log.warning(
-            "GitHub search stops at %d %s, so some may be missing; use a later --since",
-            SEARCH_LIMIT,
-            kind,
-        )
     return found
 
 
@@ -238,13 +243,15 @@ def _without_pull_request_commits(cwd: Path, commits: list[dict[str, Any]]) -> l
     by_repo: dict[str, list[dict[str, Any]]] = {}
     for found in commits:
         by_repo.setdefault(_repo(found), []).append(found)
-    from_pull_requests: set[str] = set()
+    # By repo and SHA: a fork shares its upstream's commits, but not its pull requests.
+    from_pull_requests: set[tuple[str, str]] = set()
     for repo, found_in_repo in by_repo.items():
         owner, _, name = repo.partition("/")
         for start in range(0, len(found_in_repo), COMMIT_BATCH):
             batch = [found["sha"] for found in found_in_repo[start : start + COMMIT_BATCH]]
-            from_pull_requests.update(_merged_in_pull_requests(cwd, owner, name, batch))
-    return [found for found in commits if found["sha"] not in from_pull_requests]
+            linked = _merged_in_pull_requests(cwd, owner, name, batch)
+            from_pull_requests.update((repo, sha) for sha in linked)
+    return [found for found in commits if (_repo(found), found["sha"]) not in from_pull_requests]
 
 
 def _merged_in_pull_requests(cwd: Path, owner: str, name: str, shas: list[str]) -> set[str]:
