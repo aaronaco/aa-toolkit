@@ -11,7 +11,7 @@ from collections.abc import Callable, Generator, Iterable, Iterator, Sequence
 from pathlib import Path
 from typing import BinaryIO
 
-from aa_cli.choices import WITH_KINDS, WITHOUT_KINDS
+from aa_cli.choices import WITH_KINDS, WITHOUT_KINDS, UnknownChoice, parse_choices
 from aa_redact import Finding, Redactor, ip_address, phone_number
 
 type Detector = Callable[[str], Iterable[Finding]]
@@ -50,15 +50,10 @@ class DetectorFailed(Exception):
 
 
 def _parse_kinds(flag: str, values: Sequence[str], allowed: Sequence[str]) -> list[str]:
-    parsed: list[str] = []
-    for entry in values:
-        for raw in entry.split(","):
-            name = raw.strip()
-            kind = name.upper()
-            if kind not in allowed:
-                raise UnknownKind(flag, name, allowed)
-            parsed.append(kind)
-    return parsed
+    try:
+        return parse_choices(values, allowed)
+    except UnknownChoice as exc:
+        raise UnknownKind(flag, exc.name, allowed) from None
 
 
 def build_redactor(with_values: Sequence[str] = (), without_values: Sequence[str] = ()) -> Redactor:

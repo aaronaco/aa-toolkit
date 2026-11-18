@@ -19,7 +19,7 @@ def test_aa_cli_imports_the_cli_package_from_the_package_folder(package_dir):
     assert Path(aa_cli.__file__).resolve().parent == package_dir / "src" / "aa_cli"
 
 
-def test_the_built_package_contains_the_workflow_template(package_dir, tmp_path):
+def test_the_built_package_contains_the_ci_templates(package_dir, tmp_path):
     out = tmp_path / "dist"
     subprocess.run(
         ["uv", "build", "--wheel", "--sdist", "--out-dir", str(out)],
@@ -35,5 +35,11 @@ def test_the_built_package_contains_the_workflow_template(package_dir, tmp_path)
     with tarfile.open(sdist) as archive:
         sdist_names = [name.partition("/")[2] for name in archive.getnames()]
 
-    assert "aa_cli/templates/workflows/ci.yml" in wheel_names
-    assert "src/aa_cli/templates/workflows/ci.yml" in sdist_names
+    for template in (
+        "workflows/ci.yml",
+        "workflows/zizmor.yml",
+        "workflows/uv-audit.yml",
+        "dependabot.yml",
+    ):
+        assert f"aa_cli/templates/{template}" in wheel_names
+        assert f"src/aa_cli/templates/{template}" in sdist_names

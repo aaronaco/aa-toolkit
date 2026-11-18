@@ -6,25 +6,35 @@ __lazy_modules__ = {
     "tomllib",
 }
 
+import contextlib
 import re
 import tomllib
+from collections.abc import Sequence
 from dataclasses import dataclass
 from importlib.resources import files
 from pathlib import Path
 from typing import Any
 
-from aa_cli.choices import Piece
+from aa_cli.choices import CiPart, Piece
 from aa_cli.init import (
     PYPROJECT,
     WRITE_FILES_STEP,
-    file_step,
+    StepFailed,
     step,
-    write,
 )
 
 UV_LOCK = "uv.lock"
-CI_WORKFLOW = ".github/workflows/ci.yml"
-CI_TEMPLATE = "ci.yml"
+# Each CI part's file in the project, and its template under templates/ (ADR 0008).
+CI_PART_FILES: dict[CiPart, tuple[str, str]] = {
+    CiPart.TESTS: (".github/workflows/ci.yml", "workflows/ci.yml"),
+    CiPart.ZIZMOR: (".github/workflows/zizmor.yml", "workflows/zizmor.yml"),
+    CiPart.AUDIT: (".github/workflows/uv-audit.yml", "workflows/uv-audit.yml"),
+    # Not in workflows/: Dependabot bumps every .yml file in that folder (ADR 0009).
+    CiPart.DEPENDABOT: (".github/dependabot.yml", "dependabot.yml"),
+}
+_AUDIT_LOCK_STEP = (
+    "Run 'uv lock' and commit uv.lock: the audit workflow runs 'uv audit --locked', which needs it."
+)
 NOT_A_PROJECT_FIX = "Run aa add from the project's root folder (where pyproject.toml is)."
 _CI_TOOLS = ("ruff", "pytest")
 LOG_PACKAGE = "aa-toolkit-log"
@@ -59,36 +69,84 @@ class Added:
     next_steps: list[str]
 
 
-def add_piece(target: Path, piece: Piece) -> Added:
-    """Add ``piece`` to the project in ``target``."""
+def add_piece(target: Path, piece: Piece, ci_parts: Sequence[CiPart] = tuple(CiPart)) -> Added:
+    """Add ``piece`` to the project in ``target``; for CI, only the CI parts in ``ci_parts``."""
     pyproject = target / PYPROJECT
     if not pyproject.is_file():
         raise AddError("not_a_project", f"{target} has no {PYPROJECT}", fix=NOT_A_PROJECT_FIX)
-    return _PIECES[piece](target, pyproject)
+    if piece is Piece.LOG:
+        return _add_log(target, pyproject)
+    return _add_ci(target, pyproject, ci_parts)
 
 
-def _add_ci(target: Path, pyproject: Path) -> Added:
-    workflow = target / CI_WORKFLOW
-    expected = workflow_template(CI_TEMPLATE)
-    workflow_already_there = _check_workflow_path(target, workflow, expected)
-    existing = _declared_dependencies(pyproject)
-    missing = [tool for tool in _CI_TOOLS if tool not in existing]
-    if workflow_already_there and not missing and (target / UV_LOCK).is_file():
-        return Added(files=[], next_steps=[])
-    if missing:
-        changed = _uv_step("add dev dependencies", target, "add", "--dev", *missing)
-    else:
-        changed = _uv_step("lock dependencies", target, "lock")
-    if not workflow_already_there:
-        with file_step(WRITE_FILES_STEP):
-            write(workflow, expected)
-        changed.append(CI_WORKFLOW)
-    return Added(files=sorted(changed), next_steps=[])
+def _add_ci(target: Path, pyproject: Path, ci_parts: Sequence[CiPart]) -> Added:
+    chosen = [part for part in CiPart if part in ci_parts]
+    to_write: dict[str, str] = {}
+    clashes: dict[CiPart, str] = {}
+    for part in chosen:
+        path, template = CI_PART_FILES[part]
+        expected = ci_template(template)
+        clash = _clash(target, path, expected)
+        if clash is not None:
+            clashes[part] = clash
+        elif not _has_content(target / path, expected):
+            to_write[path] = expected
+    if clashes:
+        raise _clash_error(chosen, clashes)
+    changed: list[str] = []
+    if CiPart.TESTS in chosen:
+        existing = _declared_dependencies(pyproject)
+        missing = [tool for tool in _CI_TOOLS if tool not in existing]
+        if missing:
+            changed = _uv_step("add dev dependencies", target, "add", "--dev", *missing)
+        elif CI_PART_FILES[CiPart.TESTS][0] in to_write or not (target / UV_LOCK).is_file():
+            # uv lock also brings an out-of-date lockfile up to date for 'uv sync --locked'.
+            changed = _uv_step("lock dependencies", target, "lock")
+    _write_new_files(target, to_write)
+    changed.extend(to_write)
+    next_steps = []
+    if CiPart.AUDIT in chosen and not (target / UV_LOCK).is_file():
+        next_steps.append(_AUDIT_LOCK_STEP)
+    return Added(files=sorted(changed), next_steps=next_steps)
 
 
-def workflow_template(name: str) -> str:
-    """A workflow template as it is, with no placeholders: Dependabot keeps its pins current."""
-    return (files("aa_cli") / "templates" / "workflows" / name).read_text(encoding="utf-8")
+def _write_new_files(target: Path, contents: dict[str, str]) -> None:
+    """Create every file or none, never writing over one or a link that appeared meanwhile."""
+    created: list[Path] = []
+    path = ""
+    try:
+        for path, content in contents.items():
+            file = target / path
+            file.parent.mkdir(parents=True, exist_ok=True)
+            with file.open("x", encoding="utf-8", newline="\n") as handle:
+                created.append(file)
+                handle.write(content)
+    except FileExistsError as exc:
+        _remove(created)
+        message = f"{path} appeared while aa was writing, so no CI file was written"
+        raise AddError("file_exists", message) from exc
+    except OSError as exc:
+        _remove(created)
+        raise StepFailed(WRITE_FILES_STEP, str(exc)) from exc
+
+
+def _remove(paths: list[Path]) -> None:
+    for path in paths:
+        with contextlib.suppress(OSError):
+            path.unlink(missing_ok=True)
+
+
+def _clash_error(chosen: list[CiPart], clashes: dict[CiPart, str]) -> AddError:
+    """``file_exists``, with a fix that sets up the chosen CI parts that don't clash."""
+    message = "; ".join(dict.fromkeys(clashes.values()))
+    rest = [part for part in chosen if part not in clashes]
+    fix = f"aa add ci --only {','.join(rest)}" if rest else None
+    return AddError("file_exists", message, fix=fix)
+
+
+def ci_template(name: str) -> str:
+    """A CI part's template as it is, with no placeholders: Dependabot keeps its pins current."""
+    return (files("aa_cli") / "templates" / name).read_text(encoding="utf-8")
 
 
 def _add_log(target: Path, pyproject: Path) -> Added:
@@ -123,21 +181,26 @@ def _uv_step(step_name: str, target: Path, *args: str) -> list[str]:
     return [name for name, content in _read_uv_files(target).items() if before.get(name) != content]
 
 
-_PIECES = {Piece.CI: _add_ci, Piece.LOG: _add_log}
-
-
-def _check_workflow_path(target: Path, workflow: Path, expected: str) -> bool:
-    for parent in (workflow.parent, *workflow.parent.parents):
+def _clash(target: Path, path: str, expected: str) -> str | None:
+    """Why ``path`` can't be written, or None when it's missing or already as expected."""
+    file = target / path
+    for parent in file.parents:
         if parent == target:
             break
+        rel = parent.relative_to(target).as_posix()
+        if parent.is_symlink():
+            return _LINK_CLASH.format(rel)
         if parent.exists() and not parent.is_dir():
-            rel = parent.relative_to(target).as_posix()
-            raise AddError("file_exists", f"{rel} already exists and is not a folder")
-    if _has_content(workflow, expected):
-        return True
-    if workflow.exists():
-        raise AddError("file_exists", f"{CI_WORKFLOW} already exists with different content")
-    return False
+            return f"{rel} already exists and is not a folder"
+    if file.is_symlink():
+        return _LINK_CLASH.format(path)
+    if file.exists() and not _has_content(file, expected):
+        return f"{path} already exists with different content"
+    return None
+
+
+# A link could point anywhere, even outside the project, so aa never writes through one.
+_LINK_CLASH = "{} is a link, and aa doesn't write through links"
 
 
 def _has_content(path: Path, expected: str) -> bool:

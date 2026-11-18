@@ -170,6 +170,12 @@ if sys.argv[1:2] == ["add"]:
     (Path.cwd() / "uv.lock").write_text("version = 1\n", encoding="utf-8")
     sys.exit(0)
 
+if sys.argv[1:] == ["lock"]:
+    lock = Path.cwd() / "uv.lock"
+    if not lock.exists():
+        lock.write_text("version = 1\n", encoding="utf-8")
+    sys.exit(0)
+
 print(f"fake uv: unsupported arguments {sys.argv[1:]}", file=sys.stderr)
 sys.exit(2)
 """

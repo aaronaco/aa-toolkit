@@ -57,7 +57,15 @@ def req_names(deps: list[str]) -> set[str]:
     return {re.split(r"[<>=!~;\[\s]", dep, maxsplit=1)[0].lower() for dep in deps}
 
 
-def test_add_ci_writes_workflow_adds_dev_tools_creates_lockfile_and_leaves_git_alone(
+CI_FILES = [
+    ".github/dependabot.yml",
+    ".github/workflows/ci.yml",
+    ".github/workflows/uv-audit.yml",
+    ".github/workflows/zizmor.yml",
+]
+
+
+def test_add_ci_writes_all_four_ci_parts_adds_dev_tools_creates_lockfile_and_leaves_git_alone(
     aa_in, machine, tmp_path
 ):
     machine = uv_machine(machine)
@@ -71,7 +79,7 @@ def test_add_ci_writes_workflow_adds_dev_tools_creates_lockfile_and_leaves_git_a
         "ok": True,
         "data": {
             "piece": "ci",
-            "files": [".github/workflows/ci.yml", "pyproject.toml", "uv.lock"],
+            "files": [*CI_FILES, "pyproject.toml", "uv.lock"],
             "next_steps": [],
         },
     }
@@ -86,29 +94,114 @@ def test_add_ci_writes_workflow_adds_dev_tools_creates_lockfile_and_leaves_git_a
     assert run_git(project, machine, "rev-list", "--all", "--count").strip() == "0"
 
 
-WORKFLOW_TEMPLATE = (
-    Path(__file__).resolve().parents[1] / "src" / "aa_cli" / "templates" / "workflows" / "ci.yml"
-)
+TEMPLATES = Path(__file__).resolve().parents[1] / "src" / "aa_cli" / "templates"
+WORKFLOW_TEMPLATES = {
+    ".github/workflows/ci.yml": TEMPLATES / "workflows" / "ci.yml",
+    ".github/workflows/zizmor.yml": TEMPLATES / "workflows" / "zizmor.yml",
+    ".github/workflows/uv-audit.yml": TEMPLATES / "workflows" / "uv-audit.yml",
+}
 _USES = re.compile(r"^\s*(?:- )?uses: (\S+)(.*)$", re.MULTILINE)
 
 
-def test_add_ci_writes_the_workflow_template_with_every_action_pinned_to_a_commit(
-    aa_in, machine, tmp_path
-):
-    machine = uv_machine(machine)
+def ready_project(machine, tmp_path) -> Path:
+    """A project that already has ruff, pytest and a lockfile, with a fake uv on PATH."""
+    machine.add_real("git")
     project = make_uv_project(tmp_path, machine)
+    machine.add_fake_uv()
+    pyproject = project / "pyproject.toml"
+    pyproject.write_text(
+        pyproject.read_text(encoding="utf-8") + '\n[dependency-groups]\ndev = ["ruff", "pytest"]\n',
+        encoding="utf-8",
+    )
+    (project / "uv.lock").write_text("version = 1\n", encoding="utf-8")
+    return project
+
+
+@pytest.mark.parametrize("path", sorted(WORKFLOW_TEMPLATES))
+def test_add_ci_writes_each_workflow_template_with_every_action_pinned_to_a_commit(
+    aa_in, machine, tmp_path, path
+):
+    project = ready_project(machine, tmp_path)
 
     result = aa_in(project, "add", "ci", "--json", env=machine.env)
 
     assert result.exit_code == 0, result.output
-    workflow = (project / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-    assert workflow == WORKFLOW_TEMPLATE.read_text(encoding="utf-8")
+    workflow = (project / path).read_text(encoding="utf-8")
+    assert workflow == WORKFLOW_TEMPLATES[path].read_text(encoding="utf-8")
     uses = _USES.findall(workflow)
     assert uses
     for action, comment in uses:
         assert re.fullmatch(r"[\w.-]+/[\w.-]+(?:/[\w./-]+)?@[0-9a-f]{40}", action), action
         assert re.fullmatch(r" # v\d+\.\d+\.\d+", comment), (action, comment)
     assert checkout_inputs(workflow) == {"persist-credentials": "false"}
+
+
+def uv_version(workflow: str) -> str:
+    [match] = re.finditer(r'^\s+version: "(\d+\.\d+\.\d+)"$', workflow, flags=re.MULTILINE)
+    return str(match.group(1))
+
+
+def runs_on_prs_pushes_to_main_and_weekly(workflow: str) -> bool:
+    triggers = workflow.split("\non:\n", 1)[1].split("\n\n", 1)[0]
+    return (
+        "  push:\n    branches: [main]" in triggers
+        and "  pull_request:\n" in triggers
+        and "paths" not in triggers
+        and re.search(r'  schedule:\n    - cron: "\d+ \d+ \* \* \d"', triggers) is not None
+    )
+
+
+def test_the_zizmor_ci_part_gates_with_annotations_and_no_security_tab_upload(
+    aa_in, machine, tmp_path
+):
+    project = ready_project(machine, tmp_path)
+
+    result = aa_in(project, "add", "ci", "--only", "zizmor", "--json", env=machine.env)
+
+    assert result.exit_code == 0, result.output
+    workflow = (project / ".github/workflows/zizmor.yml").read_text(encoding="utf-8")
+    assert runs_on_prs_pushes_to_main_and_weekly(workflow)
+    [step] = [line for line in workflow.splitlines() if "uses: zizmorcore/zizmor-action@" in line]
+    after = workflow.split(step, 1)[1]
+    assert "advanced-security: false" in after
+    assert "annotations: true" in after
+    assert "security-events" not in workflow
+    assert "continue-on-error" not in workflow
+
+
+def test_the_audit_ci_part_runs_uv_audit_locked_with_the_tests_parts_uv_version(
+    aa_in, machine, tmp_path
+):
+    project = ready_project(machine, tmp_path)
+
+    result = aa_in(project, "add", "ci", "--only", "audit,tests", "--json", env=machine.env)
+
+    assert result.exit_code == 0, result.output
+    workflow = (project / ".github/workflows/uv-audit.yml").read_text(encoding="utf-8")
+    tests = (project / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    assert runs_on_prs_pushes_to_main_and_weekly(workflow)
+    runs = [line.strip() for line in workflow.splitlines() if line.strip().startswith("- run:")]
+    assert len(runs) == 1
+    assert runs == ["- run: uv audit --locked --preview-features audit-command"]
+    assert "continue-on-error" not in workflow
+    assert uv_version(workflow) == uv_version(tests)
+
+
+def test_the_dependabot_ci_part_updates_actions_monthly_in_one_group_with_a_cooldown(
+    aa_in, machine, tmp_path
+):
+    project = ready_project(machine, tmp_path)
+
+    result = aa_in(project, "add", "ci", "--only", "dependabot", "--json", env=machine.env)
+
+    assert result.exit_code == 0, result.output
+    config = (project / ".github/dependabot.yml").read_text(encoding="utf-8")
+    assert config == (TEMPLATES / "dependabot.yml").read_text(encoding="utf-8")
+    assert re.findall(r"package-ecosystem: (\S+)", config) == ["github-actions"]
+    assert "interval: monthly" in config
+    assert re.search(r"cooldown:\n\s+default-days: 7\n", config)
+    assert re.search(r'groups:\n\s+\S+:\n\s+patterns: \["\*"\]', config)
+    assert "commit-message" not in config
 
 
 def checkout_inputs(workflow: str) -> dict[str, str]:
@@ -130,9 +223,8 @@ def checkout_inputs(workflow: str) -> dict[str, str]:
     return inputs
 
 
-def test_zizmor_finds_nothing_in_the_workflow_add_ci_writes(aa_in, machine, tmp_path):
-    machine = uv_machine(machine)
-    project = make_uv_project(tmp_path, machine)
+def test_zizmor_finds_nothing_in_the_files_add_ci_writes(aa_in, machine, tmp_path):
+    project = ready_project(machine, tmp_path)
     assert aa_in(project, "add", "ci", "--json", env=machine.env).exit_code == 0
 
     # Offline, with the default persona: the same zizmor run as the commit hook.
@@ -144,7 +236,7 @@ def test_zizmor_finds_nothing_in_the_workflow_add_ci_writes(aa_in, machine, tmp_
             "--strict-collection",
             "--format",
             "json",
-            str(project / ".github/workflows/ci.yml"),
+            *(str(project / path) for path in CI_FILES),
         ],
         capture_output=True,
         text=True,
@@ -173,7 +265,33 @@ def assert_runs_lint_and_tests_on_windows_and_linux(workflow: str) -> None:
     ]
 
 
-def test_add_ci_in_a_project_aa_init_just_made_writes_only_the_workflow(aa_in, machine, tmp_path):
+def test_adding_the_tests_part_brings_an_out_of_date_lockfile_up_to_date(aa_in, machine, tmp_path):
+    machine = uv_machine(machine)
+    project = make_uv_project(tmp_path, machine)
+    assert aa_in(project, "add", "ci", "--json", env=machine.env).exit_code == 0
+    (project / ".github/workflows/ci.yml").unlink()
+    pyproject = project / "pyproject.toml"
+    pyproject.write_text(
+        pyproject.read_text(encoding="utf-8").replace('version = "0.1.0"', 'version = "0.2.0"'),
+        encoding="utf-8",
+    )
+    lock_check = ["uv", "lock", "--check"]
+    stale = subprocess.run(
+        lock_check, cwd=project, env=host_env(machine), capture_output=True, check=False
+    )
+    assert stale.returncode != 0
+
+    result = aa_in(project, "add", "ci", "--only", "tests", "--json", env=machine.env)
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["data"]["files"] == [".github/workflows/ci.yml", "uv.lock"]
+    fresh = subprocess.run(
+        lock_check, cwd=project, env=host_env(machine), capture_output=True, check=False
+    )
+    assert fresh.returncode == 0, fresh.stderr
+
+
+def test_add_ci_in_a_project_aa_init_just_made_writes_only_the_ci_files(aa_in, machine, tmp_path):
     machine = uv_machine(machine)
     init_result = aa_in(tmp_path, "init", "demo", "--json", env=machine.env)
     assert init_result.exit_code == 0, init_result.output
@@ -188,10 +306,10 @@ def test_add_ci_in_a_project_aa_init_just_made_writes_only_the_workflow(aa_in, m
     result = aa_in(project, "add", "ci", "--json", env=env)
 
     assert result.exit_code == 0, result.output
-    assert json.loads(result.stdout)["data"]["files"] == [".github/workflows/ci.yml"]
+    assert json.loads(result.stdout)["data"]["files"] == CI_FILES
     assert {name: (project / name).read_bytes() for name in uv_files} == uv_files_before
     untracked = run_git(project, machine, "ls-files", "--others", "--exclude-standard")
-    assert untracked.splitlines() == [".github/workflows/ci.yml"]
+    assert untracked.splitlines() == CI_FILES
     assert run_git(project, machine, "diff", "--cached", "--name-only") == staged_before
 
 
@@ -202,7 +320,7 @@ def test_add_ci_in_human_mode_lists_the_same_files(aa_in, machine, tmp_path):
     result = aa_in(project, "add", "ci", env=machine.env)
 
     assert result.exit_code == 0, result.output
-    for file_path in (".github/workflows/ci.yml", "pyproject.toml", "uv.lock"):
+    for file_path in (*CI_FILES, "pyproject.toml", "uv.lock"):
         assert file_path in result.stdout
 
 
@@ -258,7 +376,7 @@ def test_add_ci_keeps_existing_dependency_version_requirements_unchanged(aa_in, 
     assert res_both.exit_code == 0, res_both.output
     assert both_pyproject.read_bytes() == before_bytes
     assert (both_dir / "uv.lock").is_file()
-    assert json.loads(res_both.stdout)["data"]["files"] == [".github/workflows/ci.yml", "uv.lock"]
+    assert json.loads(res_both.stdout)["data"]["files"] == [*CI_FILES, "uv.lock"]
 
     (both_dir / "uv.lock").unlink()
     res_relock = aa_in(both_dir, "add", "ci", "--json", env=machine.env)
@@ -324,7 +442,7 @@ def test_add_ci_adds_tools_to_dev_when_only_in_optional_or_non_default_group(
 
     assert res_excluded.exit_code == 0, res_excluded.output
     assert json.loads(res_excluded.stdout)["data"]["files"] == [
-        ".github/workflows/ci.yml",
+        *CI_FILES,
         "pyproject.toml",
         "uv.lock",
     ]
@@ -359,6 +477,8 @@ def test_existing_workflow_with_different_content_fails_with_file_exists_and_cha
     error = json.loads(as_json.stdout)["error"]
     assert error["code"] == "file_exists"
     assert ".github/workflows/ci.yml" in error["message"]
+    assert error["fix"] == "aa add ci --only zizmor,audit,dependabot"
+    assert "aa add ci --only zizmor,audit,dependabot" in human.stderr
     assert snapshot(project) == before
     assert not (project / "uv.lock").exists()
 
@@ -374,6 +494,7 @@ def test_existing_workflow_with_different_content_fails_with_file_exists_and_cha
     parent_error = json.loads(parent_json.stdout)["error"]
     assert parent_error["code"] == "file_exists"
     assert ".github" in parent_error["message"]
+    assert parent_error["fix"] is None
     assert snapshot(parent_conflict) == before_parent
     assert not (parent_conflict / "uv.lock").exists()
 
@@ -429,7 +550,7 @@ def test_when_uv_fails_it_exits_1_with_step_failed_and_writes_no_workflow(aa_in,
     error = json.loads(as_json.stdout)["error"]
     assert error["code"] == "step_failed"
     assert "fake uv: the index is unreachable" in error["message"]
-    assert not (project / ".github/workflows/ci.yml").exists()
+    assert not (project / ".github").exists()
 
 
 @pytest.mark.parametrize("args", [["add"], ["add", "unknown"]], ids=["missing", "unknown"])
@@ -446,6 +567,291 @@ def test_missing_or_unknown_piece_is_a_usage_error_listing_valid_pieces(aa, args
     assert error["code"] == "usage"
     assert "ci" in error["message"]
     assert "log" in error["message"]
+
+
+@pytest.mark.parametrize(
+    "only",
+    [
+        ["--only", "zizmor,audit"],
+        ["--only", "zizmor", "--only", "AUDIT"],
+        ["--only", " Audit , zizmor"],
+    ],
+    ids=["commas", "repeated", "spaces-and-case"],
+)
+def test_only_writes_just_the_chosen_ci_parts_and_leaves_uv_alone(aa_in, machine, tmp_path, only):
+    machine.add_real("git")
+    project = make_uv_project(tmp_path, machine)
+    machine.add_fake_uv()
+    pyproject_before = (project / "pyproject.toml").read_bytes()
+
+    result = aa_in(project, "add", "ci", *only, "--json", env=machine.env)
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["data"]["files"] == [
+        ".github/workflows/uv-audit.yml",
+        ".github/workflows/zizmor.yml",
+    ]
+    assert machine.uv_calls() == []
+    written = sorted(path.relative_to(project).as_posix() for path in project.rglob("*.yml"))
+    assert written == [".github/workflows/uv-audit.yml", ".github/workflows/zizmor.yml"]
+    assert (project / "pyproject.toml").read_bytes() == pyproject_before
+    assert not (project / "uv.lock").exists()
+
+
+AUDIT_LOCK_STEP = (
+    "Run 'uv lock' and commit uv.lock: the audit workflow runs 'uv audit --locked', which needs it."
+)
+
+
+def test_the_audit_part_without_a_lockfile_says_to_create_one(aa_in, machine, tmp_path):
+    machine.add_real("git")
+    project = make_uv_project(tmp_path, machine)
+    machine.add_fake_uv()
+
+    as_json = aa_in(project, "add", "ci", "--only", "audit", "--json", env=machine.env)
+    human = aa_in(project, "add", "ci", "--only", "audit", env=machine.env)
+
+    assert as_json.exit_code == 0, as_json.output
+    assert json.loads(as_json.stdout)["data"] == {
+        "piece": "ci",
+        "files": [".github/workflows/uv-audit.yml"],
+        "next_steps": [AUDIT_LOCK_STEP],
+    }
+    assert human.exit_code == 0, human.output
+    assert AUDIT_LOCK_STEP in human.stdout
+    assert machine.uv_calls() == []
+    assert not (project / "uv.lock").exists()
+
+
+def test_the_audit_part_with_a_lockfile_has_no_next_steps(aa_in, machine, tmp_path):
+    project = ready_project(machine, tmp_path)
+
+    result = aa_in(project, "add", "ci", "--only", "audit", "--json", env=machine.env)
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["data"]["next_steps"] == []
+
+
+def make_symlink(link: Path, target: Path) -> None:
+    try:
+        link.symlink_to(target)
+    except OSError:
+        pytest.skip("this user can't create symbolic links")
+
+
+ZIZMOR_TEMPLATE = TEMPLATES / "workflows" / "zizmor.yml"
+
+
+@pytest.mark.parametrize(
+    ("link", "outside_is"),
+    [
+        (".github/workflows/zizmor.yml", "missing"),
+        (".github", "missing"),
+        (".github", "a folder"),
+        (".github/workflows/zizmor.yml", "the template"),
+    ],
+    ids=["dangling-file", "dangling-folder", "folder-outside", "matching-file-outside"],
+)
+def test_a_link_where_a_file_goes_is_a_clash(aa_in, machine, tmp_path, link, outside_is):
+    machine.add_real("git")
+    (tmp_path / "project").mkdir()
+    project = make_uv_project(tmp_path / "project", machine)
+    machine.add_fake_uv()
+    outside = tmp_path / "outside"
+    if outside_is == "a folder":
+        outside.mkdir()
+    elif outside_is == "the template":
+        outside.write_text(ZIZMOR_TEMPLATE.read_text(encoding="utf-8"), encoding="utf-8")
+    (project / link).parent.mkdir(parents=True, exist_ok=True)
+    make_symlink(project / link, outside)
+
+    result = aa_in(project, "add", "ci", "--only", "zizmor,dependabot", "--json", env=machine.env)
+
+    assert result.exit_code == 1
+    error = json.loads(result.stdout)["error"]
+    assert error["code"] == "file_exists"
+    assert link in error["message"]
+    assert (project / link).is_symlink()
+    assert not (project / ".github/dependabot.yml").exists()
+    if outside_is == "a folder":
+        assert list(outside.iterdir()) == []
+    elif outside_is == "missing":
+        assert not outside.exists()
+
+
+def test_a_file_that_appears_while_aa_writes_is_kept_and_nothing_is_left_written(
+    aa_in, machine, tmp_path, monkeypatch
+):
+    machine.add_real("git")
+    project = make_uv_project(tmp_path, machine)
+    machine.add_fake_uv()
+    from aa_cli import add
+
+    real_clash = add._clash
+
+    def clash_then_another_program_writes(target: Path, path: str, expected: str) -> str | None:
+        found = real_clash(target, path, expected)
+        if path == ".github/dependabot.yml":
+            (target / path).parent.mkdir(parents=True, exist_ok=True)
+            (target / path).write_text("version: 2  # mine\n", encoding="utf-8")
+        return found
+
+    monkeypatch.setattr(add, "_clash", clash_then_another_program_writes)
+
+    result = aa_in(project, "add", "ci", "--only", "zizmor,dependabot", "--json", env=machine.env)
+
+    assert result.exit_code == 1, result.output
+    error = json.loads(result.stdout)["error"]
+    assert error["code"] == "file_exists"
+    assert ".github/dependabot.yml" in error["message"]
+    dependabot = project / ".github/dependabot.yml"
+    assert dependabot.read_text(encoding="utf-8") == "version: 2  # mine\n"
+    assert not (project / ".github/workflows/zizmor.yml").exists()
+
+
+def test_a_failed_write_removes_the_files_this_run_wrote(aa_in, machine, tmp_path, monkeypatch):
+    machine.add_real("git")
+    project = make_uv_project(tmp_path, machine)
+    machine.add_fake_uv()
+    real_open = Path.open
+
+    class DiskFillsUp:
+        """A new file that takes a few characters, then runs out of space."""
+
+        def __init__(self, handle) -> None:
+            self.handle = handle
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc_info) -> None:
+            self.handle.close()
+
+        def write(self, text: str) -> int:
+            self.handle.write(text[:10])
+            raise OSError(28, "No space left on device")
+
+    def open_that_fills_the_disk(self, *args, **kwargs):
+        handle = real_open(self, *args, **kwargs)
+        mode = args[0] if args else kwargs.get("mode", "r")
+        if self.name == "dependabot.yml" and "x" in mode:
+            return DiskFillsUp(handle)
+        return handle
+
+    monkeypatch.setattr(Path, "open", open_that_fills_the_disk)
+    result = aa_in(project, "add", "ci", "--only", "zizmor,dependabot", "--json", env=machine.env)
+    monkeypatch.undo()
+
+    assert result.exit_code == 1, result.output
+    error = json.loads(result.stdout)["error"]
+    assert error["code"] == "step_failed"
+    assert "No space left on device" in error["message"]
+    assert sorted(path.name for path in project.rglob("*.yml")) == []
+
+
+def test_a_clash_in_a_chosen_part_writes_nothing_and_the_fix_names_the_others(
+    aa_in, machine, tmp_path
+):
+    machine.add_real("git")
+    project = make_uv_project(tmp_path, machine)
+    machine.add_fake_uv()
+    zizmor = project / ".github/workflows/zizmor.yml"
+    zizmor.parent.mkdir(parents=True)
+    zizmor.write_text("name: my zizmor\n", encoding="utf-8")
+    before = snapshot(project)
+
+    human = aa_in(project, "add", "ci", "--only", "zizmor,audit", env=machine.env)
+    as_json = aa_in(project, "add", "ci", "--only", "zizmor,audit", "--json", env=machine.env)
+
+    assert human.exit_code == 1
+    assert "aa add ci --only audit" in human.stderr
+    assert as_json.exit_code == 1
+    error = json.loads(as_json.stdout)["error"]
+    assert error["code"] == "file_exists"
+    assert ".github/workflows/zizmor.yml" in error["message"]
+    assert error["fix"] == "aa add ci --only audit"
+    assert snapshot(project) == before
+    assert machine.uv_calls() == []
+
+
+def test_when_every_chosen_part_clashes_there_is_no_only_fix(aa_in, machine, tmp_path):
+    machine.add_real("git")
+    project = make_uv_project(tmp_path, machine)
+    machine.add_fake_uv()
+    zizmor = project / ".github/workflows/zizmor.yml"
+    zizmor.parent.mkdir(parents=True)
+    zizmor.write_text("name: my zizmor\n", encoding="utf-8")
+    before = snapshot(project)
+
+    as_json = aa_in(project, "add", "ci", "--only", "zizmor", "--json", env=machine.env)
+
+    assert as_json.exit_code == 1
+    error = json.loads(as_json.stdout)["error"]
+    assert error["code"] == "file_exists"
+    assert error["fix"] is None
+    assert snapshot(project) == before
+
+
+def test_when_every_chosen_part_is_already_there_it_exits_0_and_changes_nothing(
+    aa_in, machine, tmp_path
+):
+    machine.add_real("git")
+    project = make_uv_project(tmp_path, machine)
+    machine.add_fake_uv()
+    first = aa_in(project, "add", "ci", "--only", "dependabot,zizmor", "--json", env=machine.env)
+    assert first.exit_code == 0, first.output
+    before = snapshot(project)
+
+    human = aa_in(project, "add", "ci", "--only", "zizmor", "--only", "dependabot", env=machine.env)
+    as_json = aa_in(project, "add", "ci", "--only", "Dependabot", "--json", env=machine.env)
+
+    assert human.exit_code == 0, human.output
+    assert "already there" in human.stdout.lower()
+    assert as_json.exit_code == 0, as_json.output
+    assert json.loads(as_json.stdout) == {
+        "ok": True,
+        "data": {"piece": "ci", "files": [], "next_steps": []},
+    }
+    assert snapshot(project) == before
+    assert machine.uv_calls() == []
+
+
+def test_an_unknown_ci_part_is_a_usage_error_listing_the_four(aa_in, machine, tmp_path):
+    machine.add_real("git")
+    project = make_uv_project(tmp_path, machine)
+    machine.add_fake_uv()
+    before = snapshot(project)
+
+    human = aa_in(project, "add", "ci", "--only", "zizmor,lint", env=machine.env)
+    as_json = aa_in(project, "add", "ci", "--only", "zizmor,lint", "--json", env=machine.env)
+
+    assert human.exit_code == 2
+    assert human.stdout == ""
+    assert as_json.exit_code == 2
+    error = json.loads(as_json.stdout)["error"]
+    assert error["code"] == "usage"
+    for message in (human.stderr, error["message"]):
+        assert "lint" in message
+        assert "tests, zizmor, audit, dependabot" in message
+    assert snapshot(project) == before
+    assert machine.uv_calls() == []
+
+
+def test_only_on_add_log_is_a_usage_error_and_changes_nothing(aa_in, machine, tmp_path):
+    machine.add_real("git")
+    project = make_uv_project(tmp_path, machine)
+    machine.add_fake_uv()
+    before = snapshot(project)
+
+    human = aa_in(project, "add", "log", "--only", "zizmor", env=machine.env)
+    as_json = aa_in(project, "add", "log", "--only", "zizmor", "--json", env=machine.env)
+
+    assert human.exit_code == 2
+    assert "--only" in human.stderr
+    assert as_json.exit_code == 2
+    assert json.loads(as_json.stdout)["error"]["code"] == "usage"
+    assert snapshot(project) == before
+    assert machine.uv_calls() == []
 
 
 EXPECTED_LOG_REQUIREMENT = (
