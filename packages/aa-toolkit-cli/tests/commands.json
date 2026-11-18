@@ -224,6 +224,42 @@
         ]
       },
       {
+        "name": "standup",
+        "summary": "Print what you did on GitHub, by day and repo.",
+        "effect": "read",
+        "arguments": [],
+        "options": [
+          {
+            "flag": "--since",
+            "type": "string",
+            "default": "yesterday",
+            "choices": null,
+            "required": false,
+            "repeatable": false,
+            "help": "Start at the start of this day, in local time: yesterday, today, a weekday name such as friday, or a date such as 2026-11-01."
+          },
+          {
+            "flag": "--repo",
+            "type": "array",
+            "items": "string",
+            "default": null,
+            "choices": null,
+            "required": false,
+            "repeatable": true,
+            "help": "Only this repo: a name of your own account or owner/name. Repeatable. Default: the repo aa runs in, or every repo outside one."
+          },
+          {
+            "flag": "--all",
+            "type": "boolean",
+            "default": false,
+            "choices": null,
+            "required": false,
+            "repeatable": false,
+            "help": "Every repo, even when aa runs inside one."
+          }
+        ]
+      },
+      {
         "name": "commands",
         "summary": "List every command, its arguments, flags and exit codes.",
         "effect": "read",

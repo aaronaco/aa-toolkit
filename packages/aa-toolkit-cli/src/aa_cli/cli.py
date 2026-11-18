@@ -8,6 +8,7 @@ __lazy_modules__ = {
     "aa_cli.prune",
     "aa_cli.redact",
     "aa_cli.secret",
+    "aa_cli.standup",
     "aa_settings",
     "io",
     "shlex",
@@ -21,6 +22,7 @@ import re
 import shlex
 import sys
 from collections.abc import Callable, Generator, Sequence
+from datetime import date
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -40,6 +42,7 @@ from aa_cli.choices import (
 )
 from aa_cli.commands import describe_cli, format_commands
 from aa_cli.crash import REDACTION_FAILED, crash_folder, save_report
+from aa_cli.github import GitHubError
 from aa_cli.init import (
     NAME_RULE,
     Kind,
@@ -72,6 +75,8 @@ from aa_cli.redact import (
     redact_file,
 )
 from aa_cli.secret import NotUtf8, field_name, project_name, read_piped_value
+from aa_cli.standup import SinceError, format_standup, is_repo_name, parse_since
+from aa_cli.standup import standup as ask_standup
 from aa_settings import SecretStoreError, delete_secret, save_secret
 
 log = logging.getLogger("aa")
@@ -513,6 +518,60 @@ def prune(
         raise typer.Exit(ExitCode.PROBLEMS)
 
 
+@app.command()
+def standup(
+    ctx: typer.Context,
+    since: Annotated[
+        str,
+        typer.Option(
+            "--since",
+            metavar="WHEN",
+            help=(
+                "Start at the start of this day, in local time: yesterday, today, a weekday"
+                " name such as friday, or a date such as 2026-11-01."
+            ),
+        ),
+    ] = "yesterday",
+    repos: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--repo",
+            metavar="NAME",
+            help=(
+                "Only this repo: a name of your own account or owner/name. Repeatable."
+                " Default: the repo aa runs in, or every repo outside one."
+            ),
+            show_default=False,
+        ),
+    ] = None,
+    all_repos: Annotated[
+        bool, typer.Option("--all", help="Every repo, even when aa runs inside one.")
+    ] = False,
+    json_output: JsonFlag = False,
+    verbose: VerboseFlag = False,
+) -> None:
+    """Print what you did on GitHub, by day and repo."""
+    out: Output = ctx.obj
+    names = repos or []
+    if all_repos and names:
+        raise typer.BadParameter("use only one of them", ctx=ctx, param_hint="'--all' / '--repo'")
+    bad = next((name for name in names if not is_repo_name(name)), None)
+    if bad is not None:
+        raise typer.BadParameter(
+            f"{bad!r} isn't a repo name; give name or owner/name", ctx=ctx, param_hint="'--repo'"
+        )
+    try:
+        day = parse_since(since, date.today())
+    except SinceError as exc:
+        raise typer.BadParameter(str(exc), ctx=ctx, param_hint="'--since'") from None
+    try:
+        result = ask_standup(Path.cwd(), day, names, all_repos=all_repos)
+    except GitHubError as exc:
+        out.failure(exc.code, str(exc), fix=exc.fix)
+        raise typer.Exit(ExitCode.PROBLEMS) from exc
+    out.success(result.as_json(), human=format_standup(result))
+
+
 secret_app = typer.Typer(no_args_is_help=True)
 app.add_typer(secret_app, name="secret")
 
@@ -659,6 +718,7 @@ COMMAND_EFFECTS: dict[str, Effect] = {
     "init": Effect.WRITE,
     "prune": Effect.WRITE,
     "redact": Effect.READ,
+    "standup": Effect.READ,
     "commands": Effect.READ,
     "secret set": Effect.WRITE,
     "secret delete": Effect.WRITE,

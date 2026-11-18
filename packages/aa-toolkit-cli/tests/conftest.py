@@ -9,7 +9,7 @@ import sys
 import threading
 import time
 import tomllib
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -88,7 +88,9 @@ if sys.argv[1:] == ["api", "graphql", "--input", "-"]:
     for args in state["during_graphql"]:  # another program changing the repo meanwhile
         subprocess.run([git, *args], check=True, capture_output=True)
     query, variables = body["query"], body["variables"]
-    prs = state["pull_requests"]
+    # A pull request with a "repo" belongs to that repo only; one without belongs to any.
+    asked = f"{variables['owner']}/{variables['name']}"
+    prs = [pr for pr in state["pull_requests"] if pr.get("repo") in (None, asked)]
     on_github = {oid for pr in prs for oid in [*pr["commits"], pr["merge_commit"]] if oid}
 
     def on_default_branch(oid):
@@ -134,6 +136,57 @@ if sys.argv[1:] == ["api", "graphql", "--input", "-"]:
             "nodes": [node(pr) for pr in open_prs[: int(first)]],
         }
     print(json.dumps({"data": {"repository": repository}}))
+    sys.exit(0)
+if sys.argv[1:] == ["api", "user", "--jq", ".login"]:
+    print(state["login"])
+    sys.exit(0)
+if sys.argv[1:2] == ["search"] and sys.argv[2] in ("prs", "issues", "commits"):
+    # Answers like GitHub search from the canned results: only the user's own work, filtered
+    # by every --repo given and by the one "START..END" (or "START..*") date qualifier.
+    from datetime import datetime
+
+    kind, rest = sys.argv[2], sys.argv[3:]
+    options = {}
+    for flag, value in zip(rest[::2], rest[1::2]):
+        options.setdefault(flag, []).append(value)
+    if state["search_fails"]:
+        print("HTTP 503: Service Unavailable (https://api.github.com/search/issues)",
+              file=sys.stderr)
+        sys.exit(1)
+    if options.get("--author") != ["@me"]:
+        print("fake gh: searches must ask for --author @me", file=sys.stderr)
+        sys.exit(2)
+
+    def repo_of(item):
+        repository = item["repository"]
+        return repository.get("nameWithOwner") or repository["fullName"]
+
+    def when(timestamp):
+        return datetime.fromisoformat(timestamp)
+
+    def within(span, timestamp):
+        # "START..END" or "START..*", both ends included, as GitHub reads a range.
+        start, _, end = span.partition("..")
+        moment = when(timestamp)
+        return moment >= when(start) and (end == "*" or moment <= when(end))
+
+    items = state["search"][kind]
+    if "--repo" in options:
+        items = [item for item in items if repo_of(item) in options["--repo"]]
+    if "--merged-at" in options:
+        span = options["--merged-at"][0]
+        items = [i for i in items if i["state"] == "merged" and within(span, i["closedAt"])]
+    elif "--created" in options:
+        span = options["--created"][0]
+        items = [i for i in items if within(span, i["createdAt"])]
+    elif "--committer-date" in options:
+        span = options["--committer-date"][0]
+        items = [i for i in items if within(span, i["commit"]["committer"]["date"])]
+    else:
+        print("fake gh: no date qualifier", file=sys.stderr)
+        sys.exit(2)
+    fields = options["--json"][0].split(",")
+    print(json.dumps([{field: item[field] for field in fields} for item in items]))
     sys.exit(0)
 print(f"fake gh: unsupported arguments {sys.argv[1:]}", file=sys.stderr)
 sys.exit(2)
@@ -279,6 +332,7 @@ class Machine:
         push_fails: bool = False,
         prints_url: bool = True,
         graphql_fails: bool = False,
+        search_fails: bool = False,
     ) -> None:
         """Put a fake gh on PATH, signed in or signed out, that records every call.
 
@@ -286,7 +340,8 @@ class Machine:
         prints its URL. Signed out or with ``repo_create_fails`` it fails before
         that, ``push_fails`` makes it fail after adding the remote, and
         ``prints_url=False`` makes it print nothing (``gh repo view`` still
-        gives the URL). ``graphql_fails`` makes every GraphQL request fail as if offline.
+        gives the URL). ``graphql_fails`` makes every GraphQL request fail as if offline, and
+        ``search_fails`` does the same to every search. The signed-in account is test-user.
         """
         state = {
             "signed_in": signed_in,
@@ -294,8 +349,11 @@ class Machine:
             "push_fails": push_fails,
             "prints_url": prints_url,
             "graphql_fails": graphql_fails,
+            "search_fails": search_fails,
+            "login": "test-user",
             "pull_requests": [],
             "during_graphql": [],
+            "search": {"prs": [], "issues": [], "commits": []},
         }
         (self.bin / "fake_gh.py").write_text(FAKE_GH)
         (self.bin / "gh-state.json").write_text(json.dumps(state))
@@ -311,6 +369,19 @@ class Machine:
         path = self.bin / "gh-state.json"
         state = json.loads(path.read_text())
         state["pull_requests"] = pull_requests
+        path.write_text(json.dumps(state))
+
+    def set_search_results(
+        self,
+        prs: Sequence[dict[str, Any]] = (),
+        issues: Sequence[dict[str, Any]] = (),
+        commits: Sequence[dict[str, Any]] = (),
+    ) -> None:
+        """Give the fake gh the user's own pull requests, issues and commits, shaped as
+        ``gh search prs``, ``gh search issues`` and ``gh search commits`` print them."""
+        path = self.bin / "gh-state.json"
+        state = json.loads(path.read_text())
+        state["search"] = {"prs": list(prs), "issues": list(issues), "commits": list(commits)}
         path.write_text(json.dumps(state))
 
     def change_repo_during_graphql(self, *commands: list[str]) -> None:

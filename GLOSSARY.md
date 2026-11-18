@@ -84,6 +84,10 @@ _Avoid_: crash log, dump, bug report, telemetry
 A local branch whose last commit is one of the commits of a pull request GitHub shows as merged, with no open pull request containing that commit. `aa prune` removes only finished branches and their worktrees, and only when nothing would be lost.
 _Avoid_: merged branch (git calls a branch merged only when its commits are on the default branch, which a squash merge never does), stale branch, dead branch
 
+**Standup**:
+A short list of what you did on GitHub over a span of days, one heading per day and one line per repo: pull requests merged and opened, issues opened, and commits pushed straight to the default branch.
+_Avoid_: report, journal, summary, recap, activity log
+
 **Release**:
 Choosing a project's next version, recording its changelog and tagging it.
 _Avoid_: ship, deploy

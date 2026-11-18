@@ -163,6 +163,34 @@ aa prune
 aa prune ticket-64 --json
 ```
 
+`aa standup [--since WHEN] [--repo NAME]... [--all]` prints a Standup: what you did on GitHub, one heading per day and one line per repo. Each repo's entry lists, one kind per line and in this order, the pull requests you authored that merged that day, those you opened that day that didn't also merge that day, the issues you opened (numbers only), and the commits you authored that landed on a default branch without a pull request (by subject line, on the day of their commit time, since GitHub keeps no time for a push). Pull request titles lose a leading lowercase Conventional Commit prefix such as `feat(cli): `, so `Windows: support long paths` stays whole. Review comments are left out. Repos of your own account show by name, other people's as `owner/name`. Days with nothing on them are skipped, and a span with nothing at all prints one line and exits `0`. The command only reads, and aa saves nothing: GitHub keeps the history, so any past span can be printed again.
+
+The span runs from the start of the `--since` day, in your local time zone, up to now. `--since` takes `yesterday` (the default), `today`, a weekday name such as `friday` (the most recent one before today) or a date such as `2026-11-01`. A future date or anything else is a usage error. Yesterday is always the calendar day before, so on a Monday use `--since friday` to cover the weekend.
+
+Inside a git repo, aa covers only that repo's GitHub repo, the one gh finds for the folder (`gh repo set-default` decides for a fork). Outside any repo, or with `--all`, it covers every repo. `--repo` names the repos to cover wherever aa runs: a bare name is a repo of your own account, `owner/name` anyone's. It can be repeated, and it can't be combined with `--all`. A git folder with no GitHub repo fails with `no_github_remote`, as `aa prune` does, and the fix points to `--repo` and `--all`. aa asks GitHub through gh's search, one search per kind for the whole span, so gh must be signed in. A commit GitHub links to a merged pull request (its squash commit, its merge commit, or one of its own commits after a rebase merge) isn't listed as pushed, since the pull request is; aa asks GitHub about the commits in one GraphQL request per 50 commits. GitHub search returns at most 1,000 results per kind, so a span that reaches that warns on stderr that some may be missing.
+
+With `--json` (or `AA_JSON=1`), `data` holds `since` (the span's start, with its time zone offset), `all_repos`, `repos` (each `owner/name`, empty when `all_repos` is true), `incomplete` (the sections, out of `merged`, `opened`, `issues` and `pushed`, whose search reached GitHub's 1,000-result limit) and `days`, each with its `date` and `repos`. Each of those has its `repo` (`owner/name`), `merged`, `opened` and `issues` (each with `number`, `title` as GitHub has it, and `url`) and `pushed` (each with a short `sha`, `subject` and `url`).
+
+```bash
+aa standup
+```
+
+```text
+2026-11-17
+  aa-toolkit: merged #94 (add aa prune to remove Finished branches and their worktrees), #99 (aa init stops writing a CI workflow)
+              opened #102 (aa add ci sets up four CI parts, with --only to pick)
+              tickets #96, #97, #98
+  vibes:      pushed "Add debug-tool glossary terms and north ADR"
+```
+
+```bash
+aa standup --since friday --all
+```
+
+```bash
+aa standup --since 2026-11-01 >> journal.md
+```
+
 `aa commands` lists every visible command with its summary. With `--json` (or `AA_JSON=1`), it follows the Output contract and describes the exit codes, the global flags (`--json`, `--verbose`, `--version`), and each command's summary, arguments, options and effect (`read` or `write`), so an agent or script can learn how to run `aa` without reading `--help`.
 
 ```bash
@@ -325,10 +353,10 @@ Every `aa` command follows the same rules, so scripts and AI agents can rely on 
 | `no_secret_store` | `1` | `aa secret set` or `aa secret delete` found no Secret store on this machine. |
 | `not_a_git_repo` | `1` | `aa prune` ran outside a git repo. Nothing changed. |
 | `branch_not_found` | `1` | `aa prune` was given a name that isn't a local branch. The message names it. Nothing changed. |
-| `gh_signed_out` | `1` | `aa prune` found gh signed out of github.com. The fix is `gh auth login`. Nothing changed. |
-| `no_github_remote` | `1` | `aa prune` found no GitHub repo for the repo it runs in. The message holds gh's error, and the fix is the `git remote add` command. Nothing changed. |
-| `github_request_failed` | `1` | `aa prune` couldn't ask GitHub about the pull requests, for example because it's offline. The message holds gh's error. Nothing changed. |
-| `usage` | `2` | Bad or conflicting flags, a missing argument, an `aa init` name that breaks the name rule, `aa redact` with no file and a terminal for standard input, or for `aa secret`: a `NAME` no Settings field can have, no app name (the message names `--app`), an empty value, or `--json` with a terminal for standard input. Nothing was created. |
+| `gh_signed_out` | `1` | `aa prune` or `aa standup` found gh signed out of github.com. The fix is `gh auth login`. Nothing changed. |
+| `no_github_remote` | `1` | `aa prune` or `aa standup` found no GitHub repo for the git repo it runs in. The message holds gh's error. For `aa prune` the fix is the `git remote add` command; for `aa standup` it's `--repo` or `--all`. Nothing changed. |
+| `github_request_failed` | `1` | `aa prune` couldn't ask GitHub about the pull requests, or `aa standup` couldn't search GitHub, for example because it's offline. The message holds gh's error. Nothing changed. |
+| `usage` | `2` | Bad or conflicting flags, a missing argument, an `aa init` name that breaks the name rule, `aa redact` with no file and a terminal for standard input, or for `aa secret`: a `NAME` no Settings field can have, no app name (the message names `--app`), an empty value, or `--json` with a terminal for standard input; for `aa standup`: a `--since` that is in the future or not understood, a `--repo` that can't name a GitHub repo, or `--all` with `--repo`. Nothing was created. |
 | `aborted` | `130` | Ctrl+C stopped the command, including at the `aa secret set` prompt. When `aa init` had started writing, the message says the folder was left as it is. |
 | `unexpected` | `3` | An uncaught error, such as uv, git or gh missing from PATH, or a Secret store that fails (the message never holds the value). `fix` names the Crash report saved for it (see the CLI README), or is null when the report can't be saved. Rerun with `--verbose` for the traceback. |
 
