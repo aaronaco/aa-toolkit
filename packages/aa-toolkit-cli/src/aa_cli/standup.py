@@ -5,6 +5,7 @@ __lazy_modules__ = {"aa_cli.github", "aa_cli.process", "json"}
 import json
 import logging
 import re
+import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
@@ -30,8 +31,12 @@ COMMIT_BATCH = 50
 LINKED_LIMIT = 10
 
 
-# A GitHub repo: "name" of the signed-in account, or "owner/name".
-_REPO_NAME = re.compile(r"(?:[A-Za-z0-9-]+/)?[A-Za-z0-9._-]+")
+# A GitHub repo: "name" of the signed-in account, or "owner/name". An owner has up to 39
+# letters, digits and single hyphens, never at the start or end; a name up to 100 letters,
+# digits, ".", "-" and "_", and is never "." or "..".
+_REPO_NAME = re.compile(
+    r"(?:[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}/)?(?!\.\.?$)[A-Za-z0-9._-]{1,100}"
+)
 
 
 def is_repo_name(text: str) -> bool:
@@ -151,8 +156,10 @@ def standup(cwd: Path, since: date, repos: Sequence[str], *, all_repos: bool) ->
     login = _login(cwd)
     scope = _scope(cwd, login, repos, all_repos=all_repos)
     start = datetime.combine(since, time.min).astimezone()
-    # A range rather than ">=": a gh run through a .cmd shim would read ">" as a redirect.
-    qualifier = f"{start.isoformat()}..*"
+    # A range rather than ">=": a gh run through a .cmd shim would read ">" as a redirect. It
+    # ends now, so a commit from a clock set ahead never lands on a day still to come.
+    now = datetime.now().astimezone().replace(microsecond=0)
+    qualifier = f"{start.isoformat()}..{now.isoformat()}"
     repo_flags = [arg for repo in scope or [] for arg in ("--repo", repo)]
     pr_fields = "number,title,url,repository,createdAt,closedAt,state"
     merged = _search(cwd, "prs", "--merged-at", qualifier, pr_fields, repo_flags)
@@ -331,8 +338,13 @@ def _shown_name(repo: str, login: str) -> str:
     return name if owner.casefold() == login.casefold() else repo
 
 
+def _printable(text: str) -> str:
+    """``text`` without control characters, so a title can't move the cursor or clear the screen."""
+    return "".join(char for char in text if unicodedata.category(char) != "Cc")
+
+
 def _title(text: str) -> str:
-    return _PREFIX.sub("", text, count=1)
+    return _PREFIX.sub("", _printable(text), count=1)
 
 
 def format_standup(result: Standup) -> str:
@@ -356,17 +368,14 @@ def format_standup(result: Standup) -> str:
 
 
 def _parts(entry: RepoDay) -> list[str]:
-    parts = []
-    if entry.merged:
-        parts.append(
-            "merged " + ", ".join(f"#{i.number} ({_title(i.title)})" for i in entry.merged)
-        )
-    if entry.opened:
-        parts.append(
-            "opened " + ", ".join(f"#{i.number} ({_title(i.title)})" for i in entry.opened)
-        )
-    if entry.issues:
-        parts.append("tickets " + ", ".join(f"#{i.number}" for i in entry.issues))
-    if entry.pushed:
-        parts.append("pushed " + ", ".join(f'"{push.subject}"' for push in entry.pushed))
-    return parts
+    """The lines of one repo's entry: merged, opened, tickets and pushed, each when there's any."""
+    titled = [
+        (label, ", ".join(f"#{item.number} ({_title(item.title)})" for item in items))
+        for label, items in (("merged", entry.merged), ("opened", entry.opened))
+    ]
+    listed = [
+        *titled,
+        ("tickets", ", ".join(f"#{item.number}" for item in entry.issues)),
+        ("pushed", ", ".join(f'"{_printable(push.subject)}"' for push in entry.pushed)),
+    ]
+    return [f"{label} {text}" for label, text in listed if text]

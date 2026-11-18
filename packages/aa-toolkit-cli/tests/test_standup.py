@@ -289,7 +289,7 @@ def test_a_span_with_nothing_in_it_prints_one_line_and_exits_0(aa_in, machine, t
 def started_at(machine) -> set[str]:
     """The span start every gh search asked for."""
     return {
-        value.removesuffix("..*")
+        value.partition("..")[0]
         for args in searches(machine)
         for flag in ("--merged-at", "--created", "--committer-date")
         for value in option(args, flag)
@@ -505,12 +505,9 @@ def test_a_span_of_several_days_runs_one_search_per_kind(aa_in, machine, tmp_pat
     result = aa_in(folder, "standup", "--since", "2026-11-01", env=env)
 
     assert result.exit_code == 0, result.output
+    date_flags = ("--merged-at", "--created", "--committer-date")
     kinds = sorted(
-        (
-            args[1],
-            next(flag for flag in args if flag in ("--merged-at", "--created", "--committer-date")),
-        )
-        for args in searches(machine)
+        (args[1], flag) for args in searches(machine) for flag in args if flag in date_flags
     )
     assert kinds == [
         ("commits", "--committer-date"),
@@ -629,7 +626,11 @@ def test_json_with_every_repo_says_so(aa_in, machine, tmp_path):
     }
 
 
-@pytest.mark.parametrize("name", ["", "a/b/c", "/vibes", "owner/", "my repo"])
+@pytest.mark.parametrize(
+    "name",
+    ["", "a/b/c", "/vibes", "owner/", "my repo", "..", "owner/.", "-owner/app", "a" * 101,
+     "o" * 40 + "/app"],
+)  # fmt: skip
 def test_a_repo_name_that_cant_be_a_github_repo_is_a_usage_error(aa_in, machine, tmp_path, name):
     machine = standup_machine(machine)
     folder, env = outside_any_repo(tmp_path, machine)
@@ -731,3 +732,48 @@ def test_searches_under_githubs_limit_print_no_warning(aa_in, machine, tmp_path)
 
     assert result.exit_code == 0, result.output
     assert result.stderr == ""
+
+
+def test_the_span_ends_now_so_a_commit_dated_in_the_future_is_left_out(aa_in, machine, tmp_path):
+    machine = standup_machine(machine)
+    tomorrow = (datetime.now() + timedelta(days=1)).astimezone()
+    machine.set_search_results(
+        commits=[commit("test-user/app", "f" * 40, "From a clock set ahead", tomorrow)]
+    )
+    folder, env = outside_any_repo(tmp_path, machine)
+    before = datetime.now().astimezone()
+
+    result = aa_in(folder, "standup", "--since", "today", env=env)
+
+    after = datetime.now().astimezone()
+    assert result.exit_code == 0, result.output
+    assert result.stdout.startswith("Nothing on GitHub since ")
+    ends = {
+        option(args, flag)[0].partition("..")[2]
+        for args in searches(machine)
+        for flag in ("--merged-at", "--created", "--committer-date")
+        if option(args, flag)
+    }
+    assert len(ends) == 1
+    end = datetime.fromisoformat(ends.pop())
+    assert before.replace(microsecond=0) <= end <= after
+
+
+def test_control_characters_in_titles_and_subjects_never_reach_the_terminal(
+    aa_in, machine, tmp_path
+):
+    machine = standup_machine(machine)
+    machine.set_search_results(
+        prs=[pull_request("test-user/app", 1, "fix: \x1b[2Jclear\x07", local("2026-11-17"))],
+        commits=[
+            commit("test-user/app", "c" * 40, "Push \x1b]8;;x\x1b\\link\r", local("2026-11-17"))
+        ],
+    )
+    folder, env = outside_any_repo(tmp_path, machine)
+
+    result = aa_in(folder, "standup", "--since", "2026-11-17", env=env)
+
+    assert result.exit_code == 0, result.output
+    assert result.stdout == (
+        '2026-11-17\n  app: opened #1 ([2Jclear)\n       pushed "Push ]8;;x\\link"\n'
+    )

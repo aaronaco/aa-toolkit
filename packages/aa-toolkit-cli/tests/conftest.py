@@ -140,7 +140,7 @@ if sys.argv[1:] == ["api", "user", "--jq", ".login"]:
     sys.exit(0)
 if sys.argv[1:2] == ["search"] and sys.argv[2] in ("prs", "issues", "commits"):
     # Answers like GitHub search from the canned results: only the user's own work, filtered
-    # by every --repo given and by the one "TIMESTAMP..*" date qualifier.
+    # by every --repo given and by the one "START..END" (or "START..*") date qualifier.
     from datetime import datetime
 
     kind, rest = sys.argv[2], sys.argv[3:]
@@ -162,18 +162,24 @@ if sys.argv[1:2] == ["search"] and sys.argv[2] in ("prs", "issues", "commits"):
     def when(timestamp):
         return datetime.fromisoformat(timestamp)
 
+    def within(span, timestamp):
+        # "START..END" or "START..*", both ends included, as GitHub reads a range.
+        start, _, end = span.partition("..")
+        moment = when(timestamp)
+        return moment >= when(start) and (end == "*" or moment <= when(end))
+
     items = state["search"][kind]
     if "--repo" in options:
         items = [item for item in items if repo_of(item) in options["--repo"]]
     if "--merged-at" in options:
-        start = when(options["--merged-at"][0].removesuffix("..*"))
-        items = [i for i in items if i["state"] == "merged" and when(i["closedAt"]) >= start]
+        span = options["--merged-at"][0]
+        items = [i for i in items if i["state"] == "merged" and within(span, i["closedAt"])]
     elif "--created" in options:
-        start = when(options["--created"][0].removesuffix("..*"))
-        items = [i for i in items if when(i["createdAt"]) >= start]
+        span = options["--created"][0]
+        items = [i for i in items if within(span, i["createdAt"])]
     elif "--committer-date" in options:
-        start = when(options["--committer-date"][0].removesuffix("..*"))
-        items = [i for i in items if when(i["commit"]["committer"]["date"]) >= start]
+        span = options["--committer-date"][0]
+        items = [i for i in items if within(span, i["commit"]["committer"]["date"])]
     else:
         print("fake gh: no date qualifier", file=sys.stderr)
         sys.exit(2)
