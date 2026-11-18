@@ -3,6 +3,7 @@
 __lazy_modules__ = {"aa_cli.github", "aa_cli.process", "json"}
 
 import json
+import logging
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -13,6 +14,8 @@ from typing import Any
 from aa_cli.github import GitHubError, check_signed_in, folder_repo
 from aa_cli.process import error_line, run
 
+log = logging.getLogger("aa")
+
 # GitHub search gives at most 1,000 results per search.
 SEARCH_LIMIT = 1000
 
@@ -21,10 +24,10 @@ WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", 
 # A leading Conventional Commit type, with an optional scope and "!": "feat(cli)!: ". Types are
 # lowercase, so a title such as "Windows: support long paths" keeps its first word.
 _PREFIX = re.compile(r"^[a-z]+(?:\([^)]*\))?!?: +")
-# A squash merge's subject ends in "(#N)", N being its pull request.
-_SQUASH = re.compile(r"\(#(\d+)\)$")
-# A merge commit's subject starts with "Merge pull request #N".
-_MERGE_COMMIT = re.compile(r"^Merge pull request #\d+")
+
+# Commits asked about in one GraphQL request, and pull requests read per commit.
+COMMIT_BATCH = 50
+LINKED_LIMIT = 10
 
 
 # A GitHub repo: "name" of the signed-in account, or "owner/name".
@@ -100,6 +103,13 @@ class RepoDay:
     issues: list[Item] = field(default_factory=list)
     pushed: list[Push] = field(default_factory=list)
 
+    def in_order(self) -> RepoDay:
+        """Itself, with pull requests and issues by number and pushes by time."""
+        for items in (self.merged, self.opened, self.issues):
+            items.sort(key=lambda item: item.number)
+        self.pushed.sort(key=lambda push: push.committed)
+        return self
+
     def as_json(self) -> dict[str, Any]:
         return {
             "repo": self.repo,
@@ -158,7 +168,8 @@ def standup(cwd: Path, since: date, repos: Sequence[str], *, all_repos: bool) ->
     commits = _search(
         cwd, "commits", "--committer-date", qualifier, "sha,url,repository,commit", repo_flags
     )
-    return Standup(start, login, scope, _by_day(merged, opened, issues, commits))
+    pushed = _without_pull_request_commits(cwd, commits)
+    return Standup(start, login, scope, _by_day(merged, opened, issues, pushed))
 
 
 def _login(cwd: Path) -> str:
@@ -201,7 +212,65 @@ def _search(
             "github_request_failed", f"Searching GitHub for {kind} failed: {error_line(result)}"
         )
     found: list[dict[str, Any]] = json.loads(result.stdout or "[]")
+    if len(found) >= SEARCH_LIMIT:
+        log.warning(
+            "GitHub search stops at %d %s, so some may be missing; use a later --since",
+            SEARCH_LIMIT,
+            kind,
+        )
     return found
+
+
+def _without_pull_request_commits(cwd: Path, commits: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The commits no merged pull request brought to the default branch.
+
+    GitHub links a commit to the merged pull requests that hold it or whose squash or merge
+    commit it is, so this drops squash, merge and rebase merges alike. One GraphQL request
+    asks about up to ``COMMIT_BATCH`` commits of one repo.
+    """
+    by_repo: dict[str, list[dict[str, Any]]] = {}
+    for found in commits:
+        by_repo.setdefault(_repo(found), []).append(found)
+    from_pull_requests: set[str] = set()
+    for repo, found_in_repo in by_repo.items():
+        owner, _, name = repo.partition("/")
+        for start in range(0, len(found_in_repo), COMMIT_BATCH):
+            batch = [found["sha"] for found in found_in_repo[start : start + COMMIT_BATCH]]
+            from_pull_requests.update(_merged_in_pull_requests(cwd, owner, name, batch))
+    return [found for found in commits if found["sha"] not in from_pull_requests]
+
+
+def _merged_in_pull_requests(cwd: Path, owner: str, name: str, shas: list[str]) -> set[str]:
+    """Which of ``shas`` GitHub links to a merged pull request."""
+    params = ["$owner: String!", "$name: String!"]
+    fields = []
+    variables = {"owner": owner, "name": name}
+    for index, sha in enumerate(shas):
+        params.append(f"$oid{index}: GitObjectID!")
+        fields.append(
+            f"c{index}: object(oid: $oid{index}) {{ ... on Commit {{"
+            f" associatedPullRequests(first: {LINKED_LIMIT}) {{ nodes {{ state }} }} }} }}"
+        )
+        variables[f"oid{index}"] = sha
+    query = (
+        f"query({', '.join(params)}) {{ repository(owner: $owner, name: $name) {{"
+        f" {' '.join(fields)} }} }}"
+    )
+    body = json.dumps({"query": query, "variables": variables})
+    result = run("gh", "api", "graphql", "--input", "-", cwd=cwd, stdin=body)
+    if result.returncode != 0:
+        raise GitHubError(
+            "github_request_failed",
+            f"Asking GitHub which commits came from pull requests failed: {error_line(result)}",
+        )
+    repository = json.loads(result.stdout)["data"]["repository"] or {}
+    linked = set()
+    for index, sha in enumerate(shas):
+        commit = repository.get(f"c{index}") or {}
+        nodes = (commit.get("associatedPullRequests") or {}).get("nodes") or []
+        if any(node["state"] == "MERGED" for node in nodes):
+            linked.add(sha)
+    return linked
 
 
 def _local_day(timestamp: str) -> date:
@@ -231,7 +300,6 @@ def _by_day(
         return Item(found["number"], found["title"], found["url"])
 
     merged_on = {found["url"]: _local_day(found["closedAt"]) for found in merged}
-    merged_numbers = {(_repo(found), found["number"]) for found in merged}
     for found in merged:
         entry(merged_on[found["url"]], _repo(found)).merged.append(item(found))
     for found in opened:
@@ -242,24 +310,19 @@ def _by_day(
         if not found.get("isPullRequest"):
             entry(_local_day(found["createdAt"]), _repo(found)).issues.append(item(found))
     for found in commits:
-        subject = found["commit"]["message"].split("\n", 1)[0].strip()
-        squash = _SQUASH.search(subject)
-        if _MERGE_COMMIT.match(subject) or (
-            squash and (_repo(found), int(squash.group(1))) in merged_numbers
-        ):
-            continue
-        committed = datetime.fromisoformat(found["commit"]["committer"]["date"]).astimezone()
-        push = Push(found["sha"], subject, found["url"], committed)
-        entry(committed.date(), _repo(found)).pushed.append(push)
-    for repos in days.values():
-        for repo_day in repos.values():
-            for items in (repo_day.merged, repo_day.opened, repo_day.issues):
-                items.sort(key=lambda found: found.number)
-            repo_day.pushed.sort(key=lambda push: push.committed)
+        push = _push(found)
+        entry(push.committed.date(), _repo(found)).pushed.append(push)
     return [
-        (day, [days[day][repo] for repo in sorted(days[day], key=str.casefold)])
+        (day, [days[day][repo].in_order() for repo in sorted(days[day], key=str.casefold)])
         for day in sorted(days)
     ]
+
+
+def _push(found: dict[str, Any]) -> Push:
+    """A commit from commit search, by its subject line and local commit time."""
+    subject = found["commit"]["message"].split("\n", 1)[0].strip()
+    committed = datetime.fromisoformat(found["commit"]["committer"]["date"]).astimezone()
+    return Push(found["sha"], subject, found["url"], committed)
 
 
 def _shown_name(repo: str, login: str) -> str:

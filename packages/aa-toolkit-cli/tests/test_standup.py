@@ -199,16 +199,39 @@ def test_a_pull_request_merged_the_day_it_opened_shows_only_as_merged(aa_in, mac
     )
 
 
-def test_a_squash_commit_of_a_merged_pull_request_is_not_listed_as_pushed(aa_in, machine, tmp_path):
+def on_github(number: int, commits: list[str], merge_commit: str | None) -> dict[str, Any]:
+    """A merged pull request as GitHub links it to commits: its own and the one it left on the
+    default branch (a squash or merge commit, or None for a rebase merge)."""
+    return {
+        "number": number,
+        "state": "MERGED",
+        "head": f"branch-{number}",
+        "commits": commits,
+        "merge_commit": merge_commit,
+    }
+
+
+def test_commits_that_came_from_a_merged_pull_request_are_not_listed_as_pushed(
+    aa_in, machine, tmp_path
+):
     machine = standup_machine(machine)
     merged = local("2026-11-17", "17:00")
+    squash, merge, rebased, direct = "a" * 40, "b" * 40, "d" * 40, "c" * 40
     machine.set_search_results(
         prs=[pull_request("test-user/app", 5, "fix: crash", local("2026-11-17"), merged)],
         commits=[
-            commit("test-user/app", "a" * 40, "fix: crash (#5)\n\n* fix: crash", merged),
-            commit("test-user/app", "b" * 40, "Merge pull request #4 from test-user/x", merged),
-            commit("test-user/app", "c" * 40, "Bump the version", local("2026-11-17", "18:00")),
+            commit("test-user/app", squash, "fix: crash (#5)\n\n* fix: crash", merged),
+            commit("test-user/app", merge, "Merge pull request #4 from test-user/x", merged),
+            commit("test-user/app", rebased, "Tidy the menu", local("2026-11-17", "12:00")),
+            commit("test-user/app", direct, "Bump the version", local("2026-11-17", "18:00")),
         ],
+    )
+    machine.set_pull_requests(
+        [
+            on_github(5, ["1" * 40], squash),
+            on_github(4, ["2" * 40], merge),
+            on_github(6, [rebased], None),
+        ]
     )
     folder, env = outside_any_repo(tmp_path, machine)
 
@@ -218,6 +241,23 @@ def test_a_squash_commit_of_a_merged_pull_request_is_not_listed_as_pushed(aa_in,
     assert result.stdout == (
         '2026-11-17\n  app: merged #5 (crash)\n       pushed "Bump the version"\n'
     )
+    assert len(machine.graphql_requests()) == 1
+
+
+def test_a_failed_pull_request_lookup_for_commits_fails_with_ghs_error(aa_in, machine, tmp_path):
+    machine.add_real("git")
+    machine.add_gh(graphql_fails=True)
+    machine.set_search_results(
+        commits=[commit("test-user/app", "c" * 40, "Bump the version", local("2026-11-17"))]
+    )
+    folder, env = outside_any_repo(tmp_path, machine)
+
+    result = aa_in(folder, "standup", "--since", "2026-11-17", "--json", env=env)
+
+    assert result.exit_code == 1, result.output
+    error = json.loads(result.stdout)["error"]
+    assert error["code"] == "github_request_failed"
+    assert "error connecting to api.github.com" in error["message"]
 
 
 def test_a_day_with_nothing_on_it_has_no_heading(aa_in, machine, tmp_path):
@@ -637,3 +677,57 @@ def test_a_pushed_commit_that_mentions_an_issue_number_is_still_listed(aa_in, ma
 
     assert result.exit_code == 0, result.output
     assert result.stdout == '2026-11-17\n  app: tickets #12\n       pushed "Fix typo (#12)"\n'
+
+
+def test_commits_are_checked_against_pull_requests_fifty_per_request(aa_in, machine, tmp_path):
+    machine = standup_machine(machine)
+    shas = [f"{index:040x}" for index in range(1, 52)]
+    machine.set_search_results(
+        commits=[
+            commit("test-user/app", sha, f"Change {index}", local("2026-11-17", "10:00"))
+            for index, sha in enumerate(shas, start=1)
+        ]
+    )
+    machine.set_pull_requests([on_github(9, [shas[-1]], None)])
+    folder, env = outside_any_repo(tmp_path, machine)
+
+    result = aa_in(folder, "standup", "--since", "2026-11-17", "--json", env=env)
+
+    assert result.exit_code == 0, result.output
+    pushed = json.loads(result.stdout)["data"]["days"][0]["repos"][0]["pushed"]
+    assert len(pushed) == 50
+    assert all(push["subject"] != "Change 51" for push in pushed)
+    sizes = [len(request["variables"]) - 2 for request in machine.graphql_requests()]
+    assert sizes == [50, 1]
+
+
+def test_a_search_that_hits_githubs_limit_warns_that_the_standup_may_be_incomplete(
+    aa_in, machine, tmp_path
+):
+    machine = standup_machine(machine)
+    machine.set_search_results(
+        issues=[
+            issue("test-user/app", number, "Many", local("2026-11-17")) for number in range(1, 1001)
+        ]
+    )
+    folder, env = outside_any_repo(tmp_path, machine)
+
+    result = aa_in(folder, "standup", "--since", "2026-11-17", env=env)
+
+    assert result.exit_code == 0, result.output
+    assert result.stdout.startswith("2026-11-17\n  app: tickets #1, #2, #3")
+    assert result.stderr == (
+        "WARNING aa: GitHub search stops at 1000 issues, so some may be missing;"
+        " use a later --since\n"
+    )
+
+
+def test_searches_under_githubs_limit_print_no_warning(aa_in, machine, tmp_path):
+    machine = standup_machine(machine)
+    machine.set_search_results(issues=[issue("test-user/app", 1, "One", local("2026-11-17"))])
+    folder, env = outside_any_repo(tmp_path, machine)
+
+    result = aa_in(folder, "standup", "--since", "2026-11-17", env=env)
+
+    assert result.exit_code == 0, result.output
+    assert result.stderr == ""
