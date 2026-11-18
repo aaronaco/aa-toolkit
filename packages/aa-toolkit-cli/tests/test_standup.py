@@ -818,3 +818,21 @@ def test_a_commit_merged_by_pull_request_in_one_repo_still_shows_as_pushed_in_an
 
     assert result.exit_code == 0, result.output
     assert result.stdout == '2026-11-17\n  fork: pushed "Fix the build"\n'
+
+
+def test_a_commit_linked_to_many_open_pull_requests_and_one_merged_one_is_dropped(
+    aa_in, machine, tmp_path
+):
+    machine = standup_machine(machine)
+    sha = "6" * 40
+    machine.set_search_results(
+        commits=[commit("test-user/app", sha, "Shared fix", local("2026-11-17"))]
+    )
+    still_open = [{**on_github(number, [sha], None), "state": "OPEN"} for number in range(1, 11)]
+    machine.set_pull_requests([*still_open, on_github(11, [sha], None)])
+    folder, env = outside_any_repo(tmp_path, machine)
+
+    result = aa_in(folder, "standup", "--since", "2026-11-17", env=env)
+
+    assert result.exit_code == 0, result.output
+    assert result.stdout == "Nothing on GitHub since 2026-11-17.\n"

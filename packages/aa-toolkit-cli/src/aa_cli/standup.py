@@ -40,9 +40,10 @@ _SECTION_NAMES = {
     "pushed": "commits",
 }
 
-# Commits asked about in one GraphQL request, and pull requests read per commit.
+# Commits asked about in one GraphQL request, and pull requests read per commit: 50 x 100
+# stays far under GitHub's 500,000-node limit per request.
 COMMIT_BATCH = 50
-LINKED_LIMIT = 10
+LINKED_LIMIT = 100
 
 
 # A GitHub repo: "name" of the signed-in account, or "owner/name". An owner has up to 39
