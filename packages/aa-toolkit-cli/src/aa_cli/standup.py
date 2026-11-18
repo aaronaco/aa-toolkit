@@ -18,10 +18,13 @@ SEARCH_LIMIT = 1000
 
 WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 
-# A leading Conventional Commit type, with an optional scope and "!": "feat(cli)!: ".
-_PREFIX = re.compile(r"^[A-Za-z]+(?:\([^)]*\))?!?: +")
-# A squash merge's subject ends in "(#N)"; a merge commit's starts with "Merge pull request #N".
-_FROM_PULL_REQUEST = re.compile(r"\(#\d+\)$|^Merge pull request #\d+")
+# A leading Conventional Commit type, with an optional scope and "!": "feat(cli)!: ". Types are
+# lowercase, so a title such as "Windows: support long paths" keeps its first word.
+_PREFIX = re.compile(r"^[a-z]+(?:\([^)]*\))?!?: +")
+# A squash merge's subject ends in "(#N)", N being its pull request.
+_SQUASH = re.compile(r"\(#(\d+)\)$")
+# A merge commit's subject starts with "Merge pull request #N".
+_MERGE_COMMIT = re.compile(r"^Merge pull request #\d+")
 
 
 # A GitHub repo: "name" of the signed-in account, or "owner/name".
@@ -228,6 +231,7 @@ def _by_day(
         return Item(found["number"], found["title"], found["url"])
 
     merged_on = {found["url"]: _local_day(found["closedAt"]) for found in merged}
+    merged_numbers = {(_repo(found), found["number"]) for found in merged}
     for found in merged:
         entry(merged_on[found["url"]], _repo(found)).merged.append(item(found))
     for found in opened:
@@ -239,7 +243,10 @@ def _by_day(
             entry(_local_day(found["createdAt"]), _repo(found)).issues.append(item(found))
     for found in commits:
         subject = found["commit"]["message"].split("\n", 1)[0].strip()
-        if _FROM_PULL_REQUEST.search(subject):
+        squash = _SQUASH.search(subject)
+        if _MERGE_COMMIT.match(subject) or (
+            squash and (_repo(found), int(squash.group(1))) in merged_numbers
+        ):
             continue
         committed = datetime.fromisoformat(found["commit"]["committer"]["date"]).astimezone()
         push = Push(found["sha"], subject, found["url"], committed)

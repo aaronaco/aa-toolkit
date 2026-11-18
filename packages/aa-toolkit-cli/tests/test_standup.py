@@ -407,7 +407,10 @@ def test_all_together_with_repo_is_a_usage_error(aa_in, machine, tmp_path):
     result = aa_in(folder, "standup", "--all", "--repo", "vibes", "--json", env=env)
 
     assert result.exit_code == 2, result.output
-    assert json.loads(result.stdout)["error"]["code"] == "usage"
+    error = json.loads(result.stdout)["error"]
+    assert error["code"] == "usage"
+    assert "'--all' / '--repo'" in error["message"]
+    assert error["fix"].endswith("standup --help")
     assert machine.gh_calls() == []
 
 
@@ -598,3 +601,39 @@ def test_a_repo_name_that_cant_be_a_github_repo_is_a_usage_error(aa_in, machine,
     assert error["code"] == "usage"
     assert "--repo" in error["message"]
     assert machine.gh_calls() == []
+
+
+def test_a_title_keeps_a_leading_word_that_isnt_a_conventional_commit_type(
+    aa_in, machine, tmp_path
+):
+    machine = standup_machine(machine)
+    machine.set_search_results(
+        prs=[
+            pull_request("test-user/app", 1, "Windows: support long paths", local("2026-11-17")),
+            pull_request("test-user/app", 2, "WIP: menu", local("2026-11-17")),
+            pull_request("test-user/app", 3, "fix!: drop Python 3.13", local("2026-11-17")),
+        ]
+    )
+    folder, env = outside_any_repo(tmp_path, machine)
+
+    result = aa_in(folder, "standup", "--since", "2026-11-17", env=env)
+
+    assert result.exit_code == 0, result.output
+    assert result.stdout == (
+        "2026-11-17\n"
+        "  app: opened #1 (Windows: support long paths), #2 (WIP: menu), #3 (drop Python 3.13)\n"
+    )
+
+
+def test_a_pushed_commit_that_mentions_an_issue_number_is_still_listed(aa_in, machine, tmp_path):
+    machine = standup_machine(machine)
+    machine.set_search_results(
+        issues=[issue("test-user/app", 12, "Typo", local("2026-11-17", "09:00"))],
+        commits=[commit("test-user/app", "e" * 40, "Fix typo (#12)", local("2026-11-17"))],
+    )
+    folder, env = outside_any_repo(tmp_path, machine)
+
+    result = aa_in(folder, "standup", "--since", "2026-11-17", env=env)
+
+    assert result.exit_code == 0, result.output
+    assert result.stdout == '2026-11-17\n  app: tickets #12\n       pushed "Fix typo (#12)"\n'
