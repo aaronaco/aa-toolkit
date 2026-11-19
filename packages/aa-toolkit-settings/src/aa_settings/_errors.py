@@ -146,7 +146,8 @@ def _env_var_name(
         parts.append(part)
         model = _single_model(found[1].annotation)
     target = config.get("env_prefix_target", "variable")
-    prefixed = target == "all" or target == ("alias" if parts[0][1] else "variable")
+    matching = "alias" if parts[0][1] else "variable"
+    prefixed = target in ("all", matching)
     prefix = config.get("env_prefix", "") if prefixed else ""
     full_name = prefix + (delimiter or "").join(name for name, _ in parts)
     return full_name if config.get("case_sensitive", False) else full_name.upper()

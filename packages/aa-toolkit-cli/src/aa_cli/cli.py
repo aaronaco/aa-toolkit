@@ -189,11 +189,11 @@ def _report_unexpected_error(out: Output, exc: Exception, command: str | None) -
     log.debug("Unexpected error", exc_info=exc)
     detail = str(exc).splitlines()[0] if str(exc) else ""
     message = f"{type(exc).__name__}: {detail}" if detail else type(exc).__name__
-    redact = _default_redactor()
+    redactor = _default_redactor()
     out.failure(
         "unexpected",
-        _redact_message(redact, message),
-        fix=_save_crash_report(exc, command, message, redact),
+        _redact_message(redactor, message),
+        fix=_save_crash_report(exc, command, message, redactor),
     )
     return ExitCode.UNEXPECTED
 
@@ -211,16 +211,16 @@ def _redaction_failed(text: str) -> str:
     return REDACTION_FAILED
 
 
-def _redact_message(redact: Callable[[str], str], message: str) -> str:
+def _redact_message(redactor: Callable[[str], str], message: str) -> str:
     try:
-        return redact(message)
+        return redactor(message)
     except Exception:
         log.debug("Could not redact the error message", exc_info=True)
         return REDACTION_FAILED
 
 
 def _save_crash_report(
-    exc: Exception, command: str | None, message: str, redact: Callable[[str], str]
+    exc: Exception, command: str | None, message: str, redactor: Callable[[str], str]
 ) -> str | None:
     """Save a Crash report and say where it is, or give None when it can't be saved."""
     try:
@@ -231,7 +231,7 @@ def _save_crash_report(
             version=_package_version(),
             command=command,
             message=message,
-            redact=redact,
+            redact=redactor,
         )
     except Exception:
         log.debug("Could not save a crash report", exc_info=True)
@@ -412,10 +412,10 @@ def _refuse_bad_name(ctx: typer.Context, name: str) -> None:
 
     ``.`` means the current folder, so its own name must follow the rule.
     """
-    project_name = Path.cwd().name if name == "." else name
-    if is_valid_name(project_name):
+    checked_name = Path.cwd().name if name == "." else name
+    if is_valid_name(checked_name):
         return
-    label = f"the current folder's name '{project_name}'" if name == "." else f"'{name}'"
+    label = f"the current folder's name '{checked_name}'" if name == "." else f"'{name}'"
     raise typer.BadParameter(f"{label} breaks the rule: {NAME_RULE}", ctx=ctx, param_hint="'NAME'")
 
 
