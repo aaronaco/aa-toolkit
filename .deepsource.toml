@@ -1,0 +1,23 @@
+version = 1
+
+# Tests are analyzed, not excluded. Marking them lets DeepSource tell tests from library code,
+# so an assert in a test isn't reported as an assert in production code, and lets dashboard
+# ignore rules be scoped to test files only.
+test_patterns = ["packages/*/tests/**"]
+
+# No exclude_patterns: there's no vendored or generated code, and DeepSource doesn't read the
+# .tmpl templates as Python.
+
+[[analyzers]]
+name = "secrets"
+enabled = true
+
+[[analyzers]]
+name = "python"
+enabled = true
+
+  [analyzers.meta]
+  runtime_version = "3.x.x"
+  # Matches line-length in the root pyproject.toml, so ruff and DeepSource agree.
+  max_line_length = 100
+  # No type_checker: DeepSource only offers mypy, and ty already runs in CI.
